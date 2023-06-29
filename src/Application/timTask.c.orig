@@ -1,0 +1,225 @@
+/**
+  ******************************************************************************
+  * @file    timTask.c
+  * @author  Firmware-Team
+  * @version V1.0.0
+  * @date    13-06-2016
+  * @brief   
+  ******************************************************************************
+**/
+/*
+*********************************************************************************************************
+*                                             INCLUDE FILES
+*********************************************************************************************************
+*/
+#include  <includes.h>
+#include "stm32f3xx_hal.h"
+#include "stm32f3xx_hal_msp.h"
+
+/*
+*********************************************************************************************************
+*                                               INT DEFINES
+*********************************************************************************************************
+*/
+	/* Definition for TIM1 */
+#define HAL_TIM1                         TIM1
+#define TIM1_CLK_ENABLE()                __HAL_RCC_TIM1_CLK_ENABLE()
+	
+	/* Compute the prescaler value to have TIM3 counter clock equal to 10 MHz */
+	/* Initialize TIMx peripheral as follow:
+		 + Prescaler = (SystemCoreClock/2)/10000000
+		 + Period = 1000  (to have an output frequency equal to 10 KHz)
+		 + ClockDivision = 0
+		 + Counter direction = Up
+	*/
+	
+#define TIM1_CLOCK_EQUAL	10000000
+#define TIM1_PRESCALER_VALUE ((SystemCoreClock /2) / TIM1_CLOCK_EQUAL) - 1;
+	
+#define  TIM1_PERIOD_VALUE       (1000 + 50)  /* Period Value  */
+	
+#define TIM1_PULSE1_VALUE       1350        /* Capture Compare 1 Value  */
+#define TIM1_PULSE2_VALUE       900         /* Capture Compare 2 Value  */
+#define TIM1_PULSE3_VALUE       600         /* Capture Compare 3 Value  */
+#define TIM1_PULSE4_VALUE       450         /* Capture Compare 4 Value  */
+	
+	
+#define TIM1_CHANNEL4_EN 				   		true
+#if TIM1_CHANNEL4_EN
+	#define TIM1_CHANNEL4_GPIO_PORT()      		 	__HAL_RCC_GPIOA_CLK_ENABLE()
+	#define TIM1_CHANNEL4_GPIO_TYPE			   		GPIOA
+	#define TIM1_CHANNEL4_GPIO_PIN              	GPIO_PIN_11
+	#define TIM1_CHANNEL4_MODE					 	GPIO_MODE_AF_PP
+	#define TIM1_CHANNEL4_PULL					 	GPIO_PULLDOWN
+	#define TIM1_CHANNEL4_SPEED					 	GPIO_SPEED_FREQ_HIGH
+	#define TIM1_CHANNEL4_AF                       	GPIO_AF2_TIM1
+#endif
+
+/* Definition for TIM3 */
+#define HAL_TIM3                         TIM3
+#define TIM3_CLK_ENABLE()                __HAL_RCC_TIM3_CLK_ENABLE()
+
+/* Compute the prescaler value to have TIM3 counter clock equal to 10 MHz */
+/* Initialize TIMx peripheral as follow:
+	 + Prescaler = (SystemCoreClock/2)/10000000
+	 + Period = 1000  (to have an output frequency equal to 10 KHz)
+	 + ClockDivision = 0
+	 + Counter direction = Up
+*/
+
+#define TIM3_CLOCK_EQUAL	10000000
+#define TIM3_PRESCALER_VALUE ((SystemCoreClock /2) / TIM3_CLOCK_EQUAL) - 1;
+#define TIM3_PERIOD_VALUE       (1000 + 50)  /* Period Value  */
+
+#define TIM3_PULSE1_VALUE       1350        /* Capture Compare 1 Value  */
+#define TIM3_PULSE2_VALUE       900         /* Capture Compare 2 Value  */
+#define TIM3_PULSE3_VALUE       600         /* Capture Compare 3 Value  */
+#define TIM3_PULSE4_VALUE       450         /* Capture Compare 4 Value  */
+
+
+#define TIM3_CHANNEL1_EN 				   		false	
+#if TIM3_CHANNEL1_EN
+	#define TIM3_CHANNEL1_GPIO_PORT()       __HAL_RCC_GPIOA_CLK_ENABLE()
+	#define TIM3_GPIO_TYPE_CHANNEL1			   GPIOC	   
+	#define TIM3_GPIO_PIN_CHANNEL1              GPIO_PIN_6
+#endif
+
+#define TIM3_CHANNEL2_EN 				   		false
+#if TIM3_CHANNEL2_EN
+	#define TIM3_CHANNEL2_GPIO_PORT()       __HAL_RCC_GPIOC_CLK_ENABLE()
+	#define TIM3_GPIO_TYPE_CHANNEL2			   GPIOC
+	#define TIM3_GPIO_PIN_CHANNEL2              GPIO_PIN_7
+#endif
+
+#define TIM3_CHANNEL3_EN 				   		false
+#if TIM3_CHANNEL3_EN
+	#define TIM3_CHANNEL3_GPIO_PORT()       __HAL_RCC_GPIOC_CLK_ENABLE()
+	#define TIM3_GPIO_TYPE_CHANNEL3			   GPIOC
+	#define TIM3_GPIO_PIN_CHANNEL3              GPIO_PIN_8
+#endif
+
+#define TIM3_CHANNEL4_EN 				   		false
+#if TIM3_CHANNEL4_EN
+	#define TIM3_CHANNEL4_GPIO_PORT()       __HAL_RCC_GPIOC_CLK_ENABLE()
+	#define TIM3_GPIO_TYPE_CHANNEL4			   GPIOC
+	#define TIM3_GPIO_PIN_CHANNEL4              GPIO_PIN_9
+#endif
+
+		/* Definition for SPI2's NVIC */
+#define TIM3_HAL_IRQn                    TIM3_IRQn
+#define TIM3_PREEMPT_PRIORITY			 3
+#define TIM3_SUB_PRIORITY				 0
+
+
+/*
+*********************************************************************************************************
+*                                            LOCAL DEFINES
+*********************************************************************************************************
+*/
+
+
+/*
+*********************************************************************************************************
+*                                        LOCAL GLOBAL VARIABLES
+*********************************************************************************************************
+*/
+
+BspTimHandle Tim2Handle,Tim3Handle,Tim5Handle,Tim6Handle,Tim7Handle,Tim8Handle,Tim15Handle;
+
+BspPwmHandle Pwm1handle;
+
+/*
+*********************************************************************************************************
+*                                         FUNCTION PROTOTYPES
+*********************************************************************************************************
+*/
+
+
+static void Tim3ClkEnable(void)
+{
+	TIM3_CLK_ENABLE();
+}
+
+
+static void Tim3CallBackIT(void)
+{
+
+}
+
+void Tim3Config(void)
+{
+	Tim3Handle.TimHandleInit.Instance 				= HAL_TIM3;
+	
+	Tim3Handle.TimHandleInit.Init.Prescaler	 		= TIM3_PRESCALER_VALUE;
+	Tim3Handle.TimHandleInit.Init.Period		 	= TIM3_PERIOD_VALUE;
+	Tim3Handle.TimHandleInit.Init.ClockDivision 	= 0;
+	Tim3Handle.TimHandleInit.Init.CounterMode  		= TIM_COUNTERMODE_UP;
+
+	Tim3Handle.TimClkEnable 						= Tim3ClkEnable;
+
+	Tim3Handle.IrqInit.Irqn							= TIM3_HAL_IRQn;
+	Tim3Handle.IrqInit.PreemptPriority				= TIM3_PREEMPT_PRIORITY;
+	Tim3Handle.IrqInit.SubPriority					= TIM3_SUB_PRIORITY;
+
+	Tim3Handle.TimCallBack 							= Tim3CallBackIT;
+	
+	if(BspTimHandleInit(&Tim3Handle) != HAL_OK)
+	{
+	  /* Initialization Error */
+	  SaveLog(NULL,0);
+	}
+}
+
+static void Tim1ClkEnable(void)
+{
+	TIM1_CLK_ENABLE();
+}
+
+static void Tim1Channel4ClkEnable(void)
+{
+	TIM1_CHANNEL4_GPIO_PORT();
+}
+
+void Pwm1Config(void)
+{
+
+	Pwm1handle.TimHandleInit.Instance 				= HAL_TIM1;
+	
+	Pwm1handle.TimHandleInit.Init.Prescaler	 		= TIM1_PRESCALER_VALUE;
+	Pwm1handle.TimHandleInit.Init.Period		 	= TIM1_PERIOD_VALUE;
+	Pwm1handle.TimHandleInit.Init.ClockDivision 	= 0;
+	Pwm1handle.TimHandleInit.Init.CounterMode  		= TIM_COUNTERMODE_UP;
+
+	Pwm1handle.TimClkEnable 						= Tim1ClkEnable;
+
+	Pwm1handle.PwmChannel1.EnableFlag 				= false;
+	Pwm1handle.PwmChannel1.EnableFlag 				= false;
+	Pwm1handle.PwmChannel1.EnableFlag 				= false;
+
+	/**通道使能，相关参数配置**/
+	Pwm1handle.PwmChannel4.EnableFlag 				= true;
+	Pwm1handle.PwmChannel4.GpioClkInit 				= Tim1Channel4ClkEnable;
+	
+	Pwm1handle.PwmChannel4.GpioInit.Pin				= TIM1_CHANNEL4_GPIO_PIN;
+	Pwm1handle.PwmChannel4.GpioInit.Mode			= TIM1_CHANNEL4_MODE;
+	Pwm1handle.PwmChannel4.GpioInit.Pull			= TIM1_CHANNEL4_PULL;
+	Pwm1handle.PwmChannel4.GpioInit.Speed			= TIM1_CHANNEL4_SPEED;
+	Pwm1handle.PwmChannel4.GpioInit.Alternate		= TIM1_CHANNEL4_AF;
+
+	Pwm1handle.PwmChannel4.GpioPort					= TIM1_CHANNEL4_GPIO_TYPE;
+
+	Pwm1handle.PwmChannel4.OConfig.OCMode 			= TIM_OCMODE_PWM1;
+	Pwm1handle.PwmChannel4.OConfig.OCPolarity		= TIM_OCPOLARITY_HIGH;
+	Pwm1handle.PwmChannel4.OConfig.OCFastMode		= TIM_OCFAST_DISABLE;
+	Pwm1handle.PwmChannel4.OConfig.Pulse			= 520;
+
+	//if(HAL_TIM_Base_Init(&Pwm1handle.TimHandleInit) == HAL_OK)
+	if(BspPwmHandleInit(&Pwm1handle) != HAL_OK)
+	{
+	}
+
+}
+
+
+
+

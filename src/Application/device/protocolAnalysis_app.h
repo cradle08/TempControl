@@ -1,0 +1,352 @@
+/***********************************************************
+Module Name: protocolAnalysis_app.h
+Description: 协议检查，解析 ---应用层实现
+Module Date: 12-08-2016
+Module Author: Firmware-Team
+Others:
+***********************************************************/
+
+#ifndef  _PROTOCOLANALYSIS_APP_H_
+#define  _PROTOCOLANALYSIS_APP_H_
+
+#include "stm32f3xx.h"
+#include "protocolDeal.h"
+#include "PID.h"
+
+extern ProtocolDealHandle  protocolAnalysisHandle, protocolHandle;
+extern Frame stActiveRepResult;
+
+
+#define  PROTOCAL_PARAM1      0xFF
+
+/*! *************** 用于传递参数的结构体 ***************** */
+/*! 设置PID参数 */
+__packed
+typedef struct
+{
+  u8 parameter1;          //参数1
+  u8 channelNum;          //通道号
+  u8 segmentNum;
+  PIDParam stParam;
+
+} setPIDParam;
+
+/*! 设置目标温度上下限 */
+__packed
+typedef struct
+{
+  u8 parameter1;          //参数1
+  u8 channelNum;          //通道号
+  s32 upperLimit;         //上限
+  s32 lowerLimit;         //下限
+} SetTargetRangeLimit;
+
+/*! 设置温度故障(ERROR)上下限（预留）  */
+__packed
+typedef struct
+{
+  u8 parameter1;          //参数1
+  u8 channelNum;          //通道号
+  s32 upperLimit;         //上限
+  s32 lowerLimit;         //下限
+} SetErrorLimit;
+
+/*! 设置目标温度 */
+__packed
+typedef struct
+{
+  u8 parameter1;          //参数1
+  u8 channelNum;          //通道号
+  s32 targetTempValue;     //目标温度
+
+} SetTargetTempParam;
+
+/*! 使能/不使能温度控制 */
+__packed
+typedef struct
+{
+  u8 parameter1;          //参数1
+  u8 channelNum;          //通道号
+  u8 ableFlag;            //使能标示
+
+} EnableParam;
+
+
+/*! 打开/关闭制冷泵 */
+__packed
+typedef struct
+{
+  u8 parameter1;          //参数1 代表不同的泵
+  u8 ableFlag;            //使能标示
+
+} EnablePump;
+
+/*! 打开/关闭制冷风扇 */
+__packed
+typedef struct
+{
+  u8 parameter1;          //参数1  代表不同的泵
+  u8 ableFlag;            //使能标示
+
+} EnableFan;
+
+/*! 打开/关闭抽冷凝水泵 */
+__packed
+typedef struct
+{
+  u8 parameter1;          //参数1  代表不同的泵
+  u8 ableFlag;            //使能标示
+
+} EnableRefrigPump;
+
+
+/*! **************** 用于填充结果帧的结构体 *********************** */
+
+/*! 查询温控板版本 */
+__packed
+typedef struct
+{
+  u8   parameter1;          //参数1
+  u8   channelNum;          //通道号
+  u16  warningDiff;         //报警差值
+  u16  errDiff;	          //报错差值
+
+} SetSteadyDiff;
+
+/*! 设置PID配置参数 */
+__packed
+typedef struct
+{
+  u8  parameter1;          //参数1
+  u8  channelNum;
+  //	s32 maxOutput;           //PID输出上限
+  //	s32 minOutput;           //PID输出下限
+  //	s16 maxIntegralOutput;
+  //	s16 minIntegralOutput;
+  //	u8  thresholdValue;
+  //	s32 targetTemperature;   //目标温度
+  PIDCalculate  stPidCalParam;
+} SetConfigParam;
+
+/*! **************** 用于填充结果帧的结构体 *********************** */
+
+/*! 查询温控板版本 */
+//__packed
+//typedef struct
+//{
+//	u8 status;
+//	u8 parameter1;          //参数1
+//	u8 mainVer;            //主版本号
+//	u8 subVer;             //次版本号
+//	u8 editVer;            //修改号
+//	u32 SVNVer;            //SVN版本号
+//	u8 proVerMain;         //通信协议主版本号
+//	u8 proVersec;          //通信协议次版本号
+//	u8 configVerMain;      //配置文件主版本号
+//	u8 configVerSec;       //配置文件次版本号
+//}RequireVerResult;
+
+/*! 获取PID参数  */
+__packed
+typedef struct
+{
+  u8 status;
+  u8 parameter1;          //参数1
+  u8 channelNum;          //通道号
+  u8 segemetNum;
+  PIDParam stParam;
+
+} GetPIDParameter;
+
+/*! 获取目标温度上下限  */
+__packed
+typedef struct
+{
+  u8 status;
+  u8 parameter1;          //参数1
+  u8 channelNum;          //通道号
+  s32 upperLimit;         //上限
+  s32 lowerLimit;         //下限
+
+} GetTargetRangeLimit;
+
+/*! 获取出现温度故障上下限 */
+__packed
+typedef struct
+{
+  u8 status;
+  u8 parameter1;          //参数1
+  u8 channelNum;          //通道号
+  s32 upperLimit;         //上限
+  s32 lowerLimit;         //下限
+
+} GetErrorLimit;
+
+/*! 获取全部通道温度（顺序定义，字节定义，后续约定） */
+__packed
+typedef struct
+{
+  u8 status;
+  u8 parameter1;          //参数1
+  u8 channelNum;          //通道号
+  s32 currentTemp;        //读取到的温度值
+
+} GetCurTemp;
+
+
+/*! 获取目标温度 */
+__packed
+typedef struct
+{
+  u8 status;
+  u8 parameter1;          //参数1
+  u8 channelNum;          //通道号
+  s32 targetTemp;        //读取到的温度值
+
+} GetTargetTemp;
+
+/*! 获取稳态时，报警/报错温度差值 */
+__packed
+typedef struct
+{
+  u8   status;              //状态
+  u8   parameter1;          //参数1
+  u8   channelNum;          //通道号
+  u16  warningDiff;         //报警差值
+  u16  errDiff;	          //报错差值
+
+} GetSteadyDiff;
+
+/*! 获取TEC工作次数 */
+__packed
+typedef struct
+{
+  u8   status;              //状态
+  u8   parameter1;          //参数1
+  u8   channelNum;          //通道号
+  u32  hotCount;            //加热次数
+  u32  coolCount;           //制冷次数
+  u32  cycleCount;          //循环次数
+
+} GetTecParam;
+
+/*! 获取PID配置参数 */
+__packed
+typedef struct
+{
+  u8  status;              //状态
+  u8  parameter1;          //参数1
+  u8  channelNum;          //通道号
+  //	s32 maxOutput;           //PID输出上限
+  //	s32 minOutput;           //PID输出下限
+  //	s16 maxIntegralOutput;
+  //	s16 minIntegralOutput;
+  //	u8  thresholdValue;
+  PIDCalculate  stPidCalParam;
+} GetConfigParam;
+
+/*! 获取温度控制使能标示 */
+__packed
+typedef struct
+{
+  u8 status;           //状态
+  u8 parameter1;       //参数1
+  u8 channelNum;       //通道号
+  u8 flag;             //使能与否标示
+
+} GetTcFlag;
+
+
+/*！******************************** */
+
+
+typedef enum
+{
+  RESULT_LENTH_ERR = 2,                //帧长度异常
+  RESULT_CHANNEL_ERR,                  //通道异常
+  RESULT_ADC_ERR,                      //
+  RESULT_TARGET_UPPER_ERR,             //
+  RESULT_TARGET_LOWER_ERR,             //
+  RESULT_TARGET_UPPER_ERR_B,           //
+  RESULT_TARGET_LOWER_ERR_B,           //
+  RESULT_CUR_UPPER_ERR,                //
+  RESULT_CUR_LOWER_ERR,                //
+  RESULT_CUR_UPPER_ERR_B,              //
+  RESULT_CUR_LOWER_ERR_B,              //
+  RESULT_FRAME_INEXISTENCE,            //命令帧不存在
+  RESULT_PARAM1_ABNOMAL,                //
+  RESULT_PARAM_ABNOMAL,                //帧参数异常
+
+} ResultStatusDef;
+
+typedef enum
+{
+  STATUS_OK,
+  STATUS_INVALID_ERRORCODE,        //无效的错误码
+  STATUS_INVALID_FRAMESTATUS,	     //无效的帧状态
+
+} ReqErrCodeStatusDef;
+
+typedef enum
+{
+  RESULT_FRAME_BUILD_OK,					//结果帧建立正常
+  RESULT_FRAME_BUILD_ERROR,				//结果帧建立错误
+  RESULT_TX_PARAMETER_ERROR,			//帧发送函数参数输入错误，应用处理
+  RESULT_TX_ERROR,								//帧发送错误，应用处理
+  RESULT_FRAME_TX_OK,							//帧发送正确，应用处理
+  RESULT_TX_TIMEOUT,							//帧发送超时，应用处理
+  RESULT_ACTIVE_REPORT_FRAME_OK,	//构建主动上报帧OK
+  RESULT_ACTIVE_REPORT_FRAME_ERR,	//构建主动上报帧错误
+
+} BuildAppResultStatusDef;
+
+extern void ConfigProtocolParam( void );
+
+/*! 解析Command Code  FrameType为0x04  */
+BuildAppResultStatusDef AnalysisCommandCodeNoResult( Frame *RxFrame );
+
+extern BuildAppResultStatusDef AnalysisCommandCode( Frame *RxFrame );
+/*! 解析FrameType  */
+extern s32 AnalysisFrameType( Frame *RxFrame );
+
+extern BuildAppResultStatusDef BuildAppResultFrame_test( u8 FramStatus, const Frame * InputRxFrame, void *InputData, Frame * OutputTxFrame );
+extern BuildAppResultStatusDef BuildAppResultFrame( u16 FramStatus, const Frame * InputRxFrame, void *InputData, Frame * OutputTxFrame );
+
+/*
+*********************************************************************************************************
+*                                          SendNormalData
+*
+* Description : 上报正常数据
+*
+* Arguments   : FrameStatus  状态
+*				InputRxFrame     接收到的数据
+*				OutputTxFrame    输出的数据
+*				pProtocolDealHandle    字节流协议句柄
+*				timeOut 超时时间
+*
+* Returns     : FrameStatusDef 帧状态
+*
+* Notes       :
+*********************************************************************************************************
+*/
+BuildAppResultStatusDef SendNormalData( u16 FrameStatus, const Frame * InputRxFrame, void *InputData, Frame *OutputTxFrame, ProtocolDealHandle *pProtocolDealHandle, u32 timeOut );
+/*
+*********************************************************************************************************
+*                                          SendAbnormalData
+*
+* Description : 上报异常数据
+*
+* Arguments   : ErrorCode  故障码
+*				pProtocolDealHandle 字节流协议句柄
+*				OutputRxFrame 接收到的数据
+*				FrameIndex    帧序列号
+*				timeOut 超时时间
+*
+* Returns     : FrameStatusDef 帧状态
+*
+* Notes       :
+*********************************************************************************************************
+*/
+extern BuildAppResultStatusDef SendAbnormalData( s16 ErrorCode, ProtocolDealHandle *pProtocolDealHandle, Frame *OutputTxFrame, u16 *FrameIndex, u32 timeOut );
+
+#endif

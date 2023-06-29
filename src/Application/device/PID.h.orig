@@ -1,0 +1,198 @@
+
+/**
+  ******************************************************************************
+  * @file    PID.h
+  *
+  * @author  Firmware-Team
+  *
+  * @version xx.xx.xx
+  *
+  * @date    2016-07-28
+  *
+  * @brief   PID算法及自整定算法头文件
+  *  
+  ******************************************************************************
+**/
+#ifndef _PID_H_
+#define _PID_H_
+
+//#include "stm32f3xx.h"
+
+#include  <uccpu.h>
+#include "stm32f3xx_hal.h"
+
+/*!  --------------eeprom地址---start--------------------*/
+#define   PID_PARAM_P_A	          0x31     	 //PID 参数1（A通道）
+#define   PID_PARAM_I_A	          0x35	     //PID 参数2（A通道）
+#define   PID_PARAM_D_A	          0x39	     //PID 参数3（A通道）
+#define   PID_PARAM_P_B	      0x3F	     //PID 参数4（B通道）
+#define   PID_PARAM_I_B	      0x43	     //PID 参数5（B通道）
+#define   PID_PARAM_D_B	      0x47	     //PID 参数6（B通道）
+#define   PID_PARAM_P_C	          0x4D	     //PID 参数1（C通道）
+#define   PID_PARAM_I_C	          0x51	     //PID 参数2（C通道）
+#define   PID_PARAM_D_C	          0x55	     //PID 参数3（C通道）
+#define   PID_PARAM_P_D	      0x5B	     //PID 参数4（D通道）
+#define   PID_PARAM_I_D	      0x5F	     //PID 参数5（D通道）
+#define   PID_PARAM_D_D	      0x63	     //PID 参数6（D通道）
+
+#define   PIDOUTPUT_THRESHOLD_MAX        0x70	     //PID 输出最大值
+#define   PIDOUTPUT_THRESHOLD_MIN	      0x74	     //PID 输出最小值
+#define   PID_INTEGRAL_MAX2	      0x78	     //PID 积分输出最大值
+#define   PID_INTEGRAL_MIN2	      0x7A	     //PID 积分输出最小值
+#define   PID_I_SEPARATION	      0x7C	    
+#define   TARGET_TEMPERATURE2	  0x7D	     //目标温度
+
+#define   PIDOUTPUT_THRESHOLD_MAX_B        0x83	     //PID 输出最大值
+#define   PIDOUTPUT_THRESHOLD_MIN_B	      0x87	     //PID 输出最小值
+#define   PID_INTEGRAL_MAX2_B	      0x8B	     //PID 积分输出最大值
+#define   PID_INTEGRAL_MIN2_B	      0x8D	     //PID 积分输出最小值
+#define   PID_I_SEPARATION_B	      0x8F	    
+#define   TARGET_TEMPERATURE2_B	  0x90	     //目标温度
+
+#define   PIDOUTPUT_THRESHOLD_MAX_C        0x96	     //PID 输出最大值
+#define   PIDOUTPUT_THRESHOLD_MIN_C	      0x9A	     //PID 输出最小值
+#define   PID_INTEGRAL_MAX2_C	      0x9E	     //PID 积分输出最大值
+#define   PID_INTEGRAL_MIN2_C	      0xA0	     //PID 积分输出最小值
+#define   PID_I_SEPARATION_C	      0xA2	    
+#define   TARGET_TEMPERATURE2_C	  0xA3	     //目标温度
+
+#define   PIDOUTPUT_THRESHOLD_MAX_D        0xA9	     //PID 输出最大值
+#define   PIDOUTPUT_THRESHOLD_MIN_D	      0xAD	     //PID 输出最小值
+#define   PID_INTEGRAL_MAX2_D	      0xB1	     //PID 积分输出最大值
+#define   PID_INTEGRAL_MIN2_D	      0xB3	     //PID 积分输出最小值
+#define   PID_I_SEPARATION_D	      0xB5	     
+#define   TARGET_TEMPERATURE2_D	  0xB6	     //目标温度
+
+
+
+
+
+/*!  --------------eeprom地址---end--------------------*/
+
+
+/*! --------------PID 调节过程中使用的参数宏定义 start --------- */	
+#define MAX_PID_OUTPUT      (250)      //PID调节可以输出的最大值
+#define MIN_PID_OUTPUT      (-150)     //PID调节可以输出的最小值      
+
+#define MAX_I_OUTPUT         (500)          
+#define MIN_I_OUTPUT         (-500)          
+
+#define THRESHOLD_TEMP  (2)   //7 
+#define DEFAULT_HOLDER_TARGET_TEMPERATURE   (2500)
+
+/*! --------------PID 调节过程中使用的参数宏定义 end--------- */	
+
+__packed
+typedef struct
+{
+	s32 Kp ;
+	s32 Ki ;
+	s32 Kd ;
+}PIDParam;
+
+//PIDParam stPIDParam;
+
+//PID调节过程中的结构体
+__packed
+typedef struct 
+{
+    s32 TargetTemp;    
+	s32 maxOutput;
+	s32 minOutput;
+	s16 maxIntegralOutput;
+	s16 minIntegralOutput;
+	s8 threshold;      
+} PIDCalculate;        
+
+
+/*! from pidDeal.h */
+typedef struct{
+	float SetTemperature;       
+	float err;                
+	float err_last;            	
+	float Kp,Ki,Kd;            
+	float PidValue;          
+	float PidValueLast;    	
+	float integral;          
+	float umax;
+	float umin;
+	float threshold;           
+}PidInfoDef;
+
+extern void PID2_init(PidInfoDef *pPidInfo);
+extern void PidParamInit(u8 channelNum,PidInfoDef *pPidInfo);
+extern float PID2_realize(float CurrcentTemperature,float targetTemp,PidInfoDef *pPidInfo);
+extern PidInfoDef PidInfoA,PidInfoB,PidInfoC,PidInfoD;
+/*! from pidDeal.h */
+
+extern PIDCalculate stParamOfPIDCal;
+
+extern u16 SetPIDParameters(u8 channelNum, u8 segmentNum, PIDParam stPIDParam,PidInfoDef *pPidInfo);
+
+/*****************************************************************************
+* @name   s32 WriteDefaultPIDParam(PIDCalculate *pPidInfo)
+*
+* @brief  写PID 参数（只用于开机，参数初始化时使用）
+*
+* @param 
+*    Input   void
+*    Output  
+*
+* @return 
+* 
+*******************************************************************************/
+extern s32 WriteDefaultPIDParam(u8 channelNum, PIDCalculate *pPidInfo,PidInfoDef *pfPidInfo);
+
+/*****************************************************************************
+* @name   s32 PIDOutput(s32 currentTemp,u32 targetTemp,PIDParam stPIDParam)
+*
+* @brief  PID输出
+*
+* @param 
+*    Input  stPIDParam     PID参数地址
+*    Input  TargetTemp     目标温度
+*
+* @return  PID计算后的输出
+* 
+*******************************************************************************/
+//s32 PIDOutput(s32 currentTemp,u32 targetTemp,PIDParam stPIDParam);
+//extern s32 CalPIDOutput(s32 currentTemp,s32 targetTemp,PIDCalculate* stPIDCalculate);
+
+
+/*****************************************************************************
+* @name   s32 GetPIDParam(u8 channelNum, PIDParam Target)
+* @brief  获取PID参数
+
+*******************************************************************************/
+extern u16 GetPIDParam(u8 channelNum,u8 segment,PIDParam *pid, PidInfoDef pPidInfo);
+
+/*****************************************************************************
+* @name   PIDParam* SortPIDParam(s32 currentTemp,u32 targetValue)
+* @brief  按照当前温度与目标温度的差值，将PID参数分类
+*
+* @param 
+*    Input   Target      PID参数
+*    Output  无
+*
+* @return 
+* 
+*******************************************************************************/
+PIDParam SortPIDParam_A(s32 currentTemp,u32 targetValue);
+
+/*****************************************************************************
+* @name   PIDParam* SortPIDParam(s32 currentTemp,u32 targetValue)
+* @brief  按照当前温度与目标温度的差值，将PID参数分类
+*
+* @param 
+*    Input   Target      PID参数
+*    Output  无
+*
+* @return 
+* 
+*******************************************************************************/
+PIDParam SortPIDParam_B(s32 currentTemp,u32 targetValue);
+
+u16 SetPidConfigParam(u8 channelNum,PidInfoDef *pfPidInfo,PIDCalculate *pPidInfo);
+u16 GetPidConfigParam(u8 channelNum,PidInfoDef *pfPidInfo,PIDCalculate *pPidInfo);
+#endif
+

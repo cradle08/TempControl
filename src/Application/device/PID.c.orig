@@ -1,0 +1,633 @@
+
+/**
+  ******************************************************************************
+  * @file    PID.c
+  *
+  * @author  Firmware-Team
+  *
+  * @version xx.xx.xx
+  *
+  * @date    2016-07-28
+  *
+  * @brief   PID算法及自整定算法
+  *  
+  ******************************************************************************
+**/
+
+/*
+*********************************************************************************************************
+*                                             INCLUDE FILES
+*********************************************************************************************************
+*/
+#include "pid.h"
+#include "includes.h"
+//#include "stm32f3xx.h"
+#include "errcode.h"
+#include  "protocolAnalysis_app.h"
+#include <stdlib.h>
+#include "errcode.h"
+
+#include "temperature_control.h"
+
+
+/*
+*********************************************************************************************************
+*                                            LOCAL DEFINES
+*********************************************************************************************************
+*/
+
+
+#define KP    6500          
+#define KI    250 
+#define KD    0
+
+#define  THRESHOLD_VALUE     (100000)   
+PIDCalculate stParamOfPIDCal;
+PidInfoDef PidInfoA,PidInfoB,PidInfoC,PidInfoD;
+/*
+*********************************************************************************************************
+*                                        LOCAL GLOBAL VARIABLES
+*********************************************************************************************************
+*/
+__packed
+typedef struct
+{
+	s32 paramP;
+	s32 paramI;
+	s32 paramD;	
+//	s32 paramP2ofAchannel;
+//	s32 paramI2ofAchannel;
+//	s32 paramD2ofAchannel;
+//	s32 paramPofBchannel;
+//	s32 paramIofBchannel;
+//	s32 paramDofBchannel;	
+//	s32 paramP2ofBchannel;
+//	s32 paramI2ofBchannel;
+//	s32 paramD2ofBchannel;
+	u16 CheckSum;
+} PIDValue;
+
+__packed
+typedef struct
+{
+	s32 maxOutputOfPID;
+	s32 minOutputOfPID;
+	s16 maxIntegralOutput;	
+	s16 minIntegralOutput;	
+	s8 integralSeparationThreshold;
+	s32 targetTemperature;
+	u16 CheckSum;
+} PIDCalParam; 
+
+
+
+/*
+*********************************************************************************************************
+*                                      LOCAL FUNCTION PROTOTYPES
+*********************************************************************************************************
+*/
+
+
+
+
+
+
+
+
+
+/*****************************************************************************
+* @name   u16 SetPIDParameters(u8 channelNum, u8 segmentNum, PIDParam stPIDParam)
+* @brief  设置PID参数 
+*
+* @param  : 
+
+* @return   True 成功   False 失败
+*
+*******************************************************************************/
+u16 SetPIDParameters(u8 channelNum, u8 segmentNum, PIDParam stPIDParam,PidInfoDef *pPidInfo)
+{   
+	u16 ret = SUCCESS1;
+	EepromStatusDef EepromStatus;
+    PIDValue writeBuff;	
+	
+	if((channelNum >4) || (channelNum <1)) 
+	{
+		return ERR_CHANNEL_NUM;	
+	}
+	
+	if( (abs(stPIDParam.Kp) > THRESHOLD_VALUE) ||(abs(stPIDParam.Ki) > THRESHOLD_VALUE) || (abs(stPIDParam.Kd )> THRESHOLD_VALUE) )
+	{
+		return ERR_PARAM_ABNOMAL;
+	}
+	else
+	{
+		writeBuff.paramP = stPIDParam.Kp;
+		writeBuff.paramI = stPIDParam.Ki;
+		writeBuff.paramD = stPIDParam.Kd;
+	}	
+	EepromStatus = EepromWriteProgramter(PID_PARAM_P_A + (channelNum -1)*0x0E, (u8*)&writeBuff, sizeof(writeBuff));	
+	
+	if(EepromStatus == EEPROM_PROGRAM_WRITE_OK )
+	{
+		pPidInfo->Kp = (float)stPIDParam.Kp /100.0f;
+		pPidInfo->Ki = (float)stPIDParam.Ki /100.0f;
+		pPidInfo->Kd = (float)stPIDParam.Kd /100.0f;	
+		
+		return ret;					
+	}
+	else
+	{
+		return ERR_DRIVER_EEPROM;
+	}	
+	
+
+}
+
+/*****************************************************************************
+* @name   s32 GetPIDParam(u8 channelNum, PIDParam Target)
+* @brief  获取PID参数
+*
+* @param 
+*    Input   channelNum  通道值
+             
+*    Output  Target    PID参数
+*
+* @return  
+* 
+*******************************************************************************/
+u16 GetPIDParam(u8 channelNum,u8 segment,PIDParam *pid, PidInfoDef pPidInfo)
+{	
+	u16 ret = SUCCESS1;
+    PIDValue writeBuff;	
+	EepromStatusDef EepromStatus;
+	if((channelNum >4) || (channelNum <1)) 
+		return ERR_CHANNEL_NUM;	
+	
+	EepromStatus = EepromReadProgramter(PID_PARAM_P_A + (channelNum -1)*0x0E, (u8*)&writeBuff, sizeof(writeBuff));	
+	
+	if(EepromStatus == EEPROM_PROGRAM_READ_OK )
+	{
+		pid->Kp = writeBuff.paramP;
+		pid->Ki = writeBuff.paramI;
+		pid->Kd = writeBuff.paramD;
+	}
+	else
+	{
+			ret = ERR_DRIVER_EEPROM;
+	}
+	return ret;
+
+}
+
+
+
+/*****************************************************************************
+* @name   s32 WriteDefaultPIDParam(PIDCalculate *pPidInfo)
+*
+* @brief  写PID 参数
+*
+* @param 
+*    Input   void
+*    Output  
+*
+* @return 
+* 
+*******************************************************************************/
+s32 WriteDefaultPIDParam(u8 channelNum, PIDCalculate *pPidInfo,PidInfoDef *pfPidInfo)
+{	
+	s32 ret = SUCCESS1;//, statusA = false,statusB = false;
+	EepromStatusDef EepromStatus;	
+	PIDValue readBuff;
+	PIDCalParam  stPidCalParam;
+	
+
+	if((channelNum >4) || (channelNum <1))
+	{
+		return ERR_CHANNEL_NUM;	
+	}		
+
+	switch(channelNum)
+	{
+		case CHA:
+		{
+			readBuff.paramP = KP;
+			readBuff.paramI = KI;
+			readBuff.paramD = KD;
+		}
+		break;
+		
+		case CHB:
+		{
+			readBuff.paramP = KP;
+			readBuff.paramI = KI;
+			readBuff.paramD = KD;
+		}
+		break;
+		
+		case CHC:
+		{
+			readBuff.paramP = KP;
+			readBuff.paramI = KI;
+			readBuff.paramD = KD;
+		}
+		break;
+		
+		case CHD:
+		{
+			readBuff.paramP = KP;
+			readBuff.paramI = KI;
+			readBuff.paramD = KD;
+		}
+		break;
+		
+		default:
+			break;
+	}
+	
+	EepromStatus = EepromWriteProgramter(PID_PARAM_P_A + (channelNum -1)*0x0E, (u8*)&readBuff, sizeof(readBuff));	
+	if(EepromStatus == EEPROM_PROGRAM_WRITE_OK)
+	{
+		pfPidInfo->Kp = (float)readBuff.paramP/100.0f;
+		pfPidInfo->Ki = (float)readBuff.paramI/100.0f;
+		pfPidInfo->Kd = (float)readBuff.paramD/100.0f;		
+	
+	}
+	else
+	{		
+		pfPidInfo->Kp = (float)readBuff.paramP/100.0f;
+		pfPidInfo->Ki = (float)readBuff.paramI/100.0f;
+		pfPidInfo->Kd = (float)readBuff.paramD/100.0f;
+		
+//		statusA = true;
+	}
+	
+	switch(channelNum)
+	{
+		case CHA:
+		{	
+			stPidCalParam.maxOutputOfPID = MAX_PID_OUTPUT;
+			stPidCalParam.minOutputOfPID = MIN_PID_OUTPUT;
+			stPidCalParam.maxIntegralOutput = MAX_I_OUTPUT;
+			stPidCalParam.minIntegralOutput = MIN_I_OUTPUT;
+			stPidCalParam.integralSeparationThreshold = THRESHOLD_TEMP;	
+			stPidCalParam.targetTemperature = DEFAULT_HOLDER_TARGET_TEMPERATURE;	
+		}
+		break;
+		
+		case CHB:
+		{	
+			stPidCalParam.maxOutputOfPID = MAX_PID_OUTPUT;
+			stPidCalParam.minOutputOfPID = MIN_PID_OUTPUT;
+			stPidCalParam.maxIntegralOutput = MAX_I_OUTPUT;
+			stPidCalParam.minIntegralOutput = MIN_I_OUTPUT;
+			stPidCalParam.integralSeparationThreshold = THRESHOLD_TEMP;	
+			stPidCalParam.targetTemperature = DEFAULT_HOLDER_TARGET_TEMPERATURE;		  		
+		}
+		break;
+		
+		case CHC:
+		{
+			stPidCalParam.maxOutputOfPID = MAX_PID_OUTPUT;
+			stPidCalParam.minOutputOfPID = MIN_PID_OUTPUT;
+			stPidCalParam.maxIntegralOutput = MAX_I_OUTPUT;
+			stPidCalParam.minIntegralOutput = MIN_I_OUTPUT;
+			stPidCalParam.integralSeparationThreshold = THRESHOLD_TEMP;	
+			stPidCalParam.targetTemperature = DEFAULT_HOLDER_TARGET_TEMPERATURE;		
+		}
+		break;
+		
+		case CHD:
+		{
+			stPidCalParam.maxOutputOfPID = MAX_PID_OUTPUT;
+			stPidCalParam.minOutputOfPID = MIN_PID_OUTPUT;
+			stPidCalParam.maxIntegralOutput = MAX_I_OUTPUT;
+			stPidCalParam.minIntegralOutput = MIN_I_OUTPUT;
+			stPidCalParam.integralSeparationThreshold = THRESHOLD_TEMP;	
+			stPidCalParam.targetTemperature = DEFAULT_HOLDER_TARGET_TEMPERATURE;	
+		}
+		break;		
+	}
+	
+	EepromStatus = EepromWriteProgramter(PIDOUTPUT_THRESHOLD_MAX+(channelNum -1)*0x13, (u8*)&stPidCalParam, sizeof(stPidCalParam));
+	
+	if(EepromStatus == EEPROM_PROGRAM_WRITE_OK )
+	{				
+		pfPidInfo->umax = MAX_I_OUTPUT;
+		pfPidInfo->umin = MIN_I_OUTPUT;
+		pfPidInfo->threshold = THRESHOLD_TEMP;
+		pfPidInfo->SetTemperature = (float)stPidCalParam.targetTemperature/100;
+	
+	}
+	else
+	{		
+		pfPidInfo->umax = MAX_I_OUTPUT;
+		pfPidInfo->umin = MIN_I_OUTPUT;
+		pfPidInfo->threshold = THRESHOLD_TEMP;
+		pfPidInfo->SetTemperature = (float)stPidCalParam.targetTemperature/100;
+		
+		ret = false;
+	}
+	
+	return ret;
+	
+}
+
+void PidParamInit(u8 channelNum,PidInfoDef *pPidInfo)
+{
+	
+	EepromStatusDef EepromStatus;
+	PIDValue readBuff;
+	PIDCalParam  stPidCalParam;
+  EepromStatus = EepromReadProgramter(PID_PARAM_P_A + (channelNum -1)*0x0E, (u8*)&readBuff, sizeof(readBuff));
+
+	if(EepromStatus == EEPROM_PROGRAM_READ_OK)
+	{
+		
+		pPidInfo->Kp =  (float)readBuff.paramP /100.0f;
+		pPidInfo->Ki =  (float)readBuff.paramI /100.0f;
+		pPidInfo->Kd =  (float)readBuff.paramD /100.0f;	
+	}
+	else
+	{
+		switch(channelNum)
+		{
+			case CHA:
+			{
+				pPidInfo->Kp = (float)KP/100;
+				pPidInfo->Ki = (float)KI/100;
+				pPidInfo->Kd = (float)KD/100;
+			}
+			break;
+			
+			case CHB:
+			{
+				pPidInfo->Kp = (float)KP/100;
+				pPidInfo->Ki = (float)KI/100;
+				pPidInfo->Kd = (float)KD/100;
+			}
+			break;
+			
+			case CHC:
+			{
+				pPidInfo->Kp = (float)KP/100;
+				pPidInfo->Ki = (float)KI/100;
+				pPidInfo->Kd = (float)KD/100;
+			}
+			break;
+			
+			case CHD:
+			{
+				pPidInfo->Kp = (float)KP/100;
+				pPidInfo->Ki = (float)KI/100;
+				pPidInfo->Kd = (float)KD/100;
+			}
+			break;
+			
+			default:
+				break;
+		}	
+	
+	}
+	
+	EepromStatus = EepromReadProgramter(PIDOUTPUT_THRESHOLD_MAX+ (channelNum -1)*0x13, (u8*)&stPidCalParam, sizeof(stPidCalParam));	
+	if(EepromStatus == EEPROM_PROGRAM_READ_OK)
+	{
+
+		pPidInfo->umax = (float)stPidCalParam.maxIntegralOutput;
+		pPidInfo->umin = (float) stPidCalParam.minIntegralOutput;
+		pPidInfo->threshold =  (float)stPidCalParam.integralSeparationThreshold;
+		pPidInfo->err = 0.0;
+		pPidInfo->err_last = 0.0;
+		pPidInfo->PidValue = 0.0;
+		pPidInfo->PidValueLast = 0.0;	
+		pPidInfo->integral = 0.0;
+		pPidInfo->SetTemperature = (float)stPidCalParam.targetTemperature/100;
+	}
+	else
+	{
+		switch(channelNum)
+		{
+			case CHA:
+			{	
+				Debug_Printf("PID init failure! ");		
+
+				pPidInfo->SetTemperature = DEFAULT_HOLDER_TARGET_TEMPERATURE/100;		  //25°
+				pPidInfo->umax = MAX_I_OUTPUT;
+				pPidInfo->umin = MIN_I_OUTPUT;
+				pPidInfo->threshold = THRESHOLD_TEMP;
+				
+				pPidInfo->err = 0.0;
+				pPidInfo->err_last = 0.0;
+				pPidInfo->PidValue = 0.0;
+				pPidInfo->PidValueLast = 0.0;	
+				pPidInfo->integral = 0.0;		
+
+
+			}
+			break;
+
+			case CHB:
+			{	
+
+				Debug_Printf("PID init failure! ");	
+				pPidInfo->SetTemperature = DEFAULT_HOLDER_TARGET_TEMPERATURE/100;		  //25°
+				pPidInfo->umax = MAX_I_OUTPUT;
+				pPidInfo->umin = MIN_I_OUTPUT;
+				pPidInfo->threshold = THRESHOLD_TEMP;
+				
+				pPidInfo->err = 0.0;
+				pPidInfo->err_last = 0.0;
+				pPidInfo->PidValue = 0.0;
+				pPidInfo->PidValueLast = 0.0;	
+				pPidInfo->integral = 0.0;		
+
+			}
+			break;
+
+			case CHC:
+			{	
+				Debug_Printf("PID init failure! ");		
+				
+				pPidInfo->SetTemperature = DEFAULT_HOLDER_TARGET_TEMPERATURE/100;		  //25°
+				pPidInfo->umax = MAX_I_OUTPUT;
+				pPidInfo->umin = MIN_I_OUTPUT;
+				pPidInfo->threshold = THRESHOLD_TEMP;
+				
+				pPidInfo->err = 0.0;
+				pPidInfo->err_last = 0.0;
+				pPidInfo->PidValue = 0.0;
+				pPidInfo->PidValueLast = 0.0;	
+				pPidInfo->integral = 0.0;		
+
+
+			}
+			break;
+
+			case CHD:
+			{	
+				Debug_Printf("PID init failure! ");		
+				
+				pPidInfo->SetTemperature = DEFAULT_HOLDER_TARGET_TEMPERATURE/100;		  //25°
+				pPidInfo->umax = MAX_I_OUTPUT;
+				pPidInfo->umin = MIN_I_OUTPUT;
+				pPidInfo->threshold = THRESHOLD_TEMP;
+				
+				pPidInfo->err = 0.0;
+				pPidInfo->err_last = 0.0;
+				pPidInfo->PidValue = 0.0;
+				pPidInfo->PidValueLast = 0.0;	
+				pPidInfo->integral = 0.0;		
+
+			}
+			break;
+		
+			default:
+				break;			
+		}
+	}
+
+}
+
+
+float PID2_realize(float CurrcentTemperature,float targetTemp,PidInfoDef *pPidInfo)
+{
+	int index;
+//	pPidInfo->SetTemperature = targetTemp;
+	pPidInfo->err = pPidInfo->SetTemperature - CurrcentTemperature;
+
+	if(pPidInfo->PidValueLast > pPidInfo->umax) 
+  {   
+		if(fabs(pPidInfo->err) >= pPidInfo->threshold)     	
+        {
+            index = 0;
+			pPidInfo->integral = 0;
+			pPidInfo->err_last = 0;
+        }
+		else
+		{
+            index=1;
+            if(pPidInfo->err < 0)
+            {
+				pPidInfo->integral += pPidInfo->err; 
+            }
+        }
+    }
+	else if(pPidInfo->PidValueLast < pPidInfo->umin) 
+	{   
+        if(fabs(pPidInfo->err) >= pPidInfo->threshold)      
+        {
+            index = 0;
+			pPidInfo->integral = 0;
+			pPidInfo->err_last = 0;
+        }
+		else
+		{
+            index = 1;
+            if(pPidInfo->err>0)
+            {
+				pPidInfo->integral += pPidInfo->err;
+            }
+        }
+    }
+	else
+	{
+		if(fabs(pPidInfo->err) >= pPidInfo->threshold)                
+        {
+            index=0;
+			pPidInfo->integral = 0;
+			pPidInfo->err_last = 0;
+        }
+		else
+		{
+            index = 1;
+            pPidInfo->integral += pPidInfo->err;
+        }
+    }
+
+    pPidInfo->PidValue = pPidInfo->Kp*pPidInfo->err + index*pPidInfo->Ki*pPidInfo->integral + index*pPidInfo->Kd*(pPidInfo->err - pPidInfo->err_last);
+	
+    pPidInfo->err_last = pPidInfo->err;
+    pPidInfo->PidValueLast = pPidInfo->PidValue;
+    return pPidInfo->PidValue;
+}
+
+/*****************************************************************************
+* @name   s32 SetConfigParam(void)
+* @brief  温度参数初始化 
+*
+* @param  
+*    
+* @return  true:正常 false:异常
+* 
+*******************************************************************************/
+u16 SetPidConfigParam(u8 channelNum,PidInfoDef *pfPidInfo,PIDCalculate *pPidInfo)
+{
+	u16 ret = SUCCESS1;
+	EepromStatusDef EepromStatus;
+	PIDCalParam  stPidCalParam;
+		
+	if((channelNum >4) || (channelNum <1))
+	{
+		return ERR_CHANNEL_NUM;	
+	}
+	
+	stPidCalParam.maxOutputOfPID = pPidInfo->maxOutput ;
+	stPidCalParam.minOutputOfPID = pPidInfo->minOutput;
+	stPidCalParam.maxIntegralOutput = pPidInfo->maxIntegralOutput;
+	stPidCalParam.minIntegralOutput = pPidInfo->minIntegralOutput;
+	stPidCalParam.integralSeparationThreshold = pPidInfo->threshold;	
+	stPidCalParam.targetTemperature = pPidInfo->TargetTemp;		 			
+	
+	EepromStatus = EepromWriteProgramter(PIDOUTPUT_THRESHOLD_MAX+(channelNum -1)*0x13, (u8*)&stPidCalParam, sizeof(stPidCalParam));
+	
+	if(EepromStatus == EEPROM_PROGRAM_WRITE_OK )
+	{				
+		pfPidInfo->umax = pPidInfo->maxIntegralOutput;
+		pfPidInfo->umin = pPidInfo->minIntegralOutput;
+		pfPidInfo->threshold = pPidInfo->threshold;
+//		pfPidInfo->SetTemperature = (float) pPidInfo->TargetTemp/100;
+	
+	}
+	else
+	{		
+		ret = ERR_DRIVER_EEPROM;
+	}
+	
+	return ret;
+	
+}
+	
+	
+/*****************************************************************************
+* @name   s32 SetConfigParam(void)
+* @brief  温度参数初始化 
+*
+* @param  
+*    
+* @return  true:正常 false:异常
+* 
+*******************************************************************************/
+u16 GetPidConfigParam(u8 channelNum,PidInfoDef *pfPidInfo,PIDCalculate *pPidInfo)
+{
+	u16 ret = SUCCESS1;
+	EepromStatusDef EepromStatus;
+	PIDCalParam  stPidCalParam;
+
+		
+	if((channelNum >4) || (channelNum <1))
+	{
+		return ERR_CHANNEL_NUM;	
+	}
+	EepromStatus = EepromReadProgramter(PIDOUTPUT_THRESHOLD_MAX+(channelNum -1)*0x13, (u8*)&stPidCalParam, sizeof(stPidCalParam));
+	if(EEPROM_PROGRAM_READ_OK == EepromStatus)
+	{
+		pPidInfo->maxOutput = stPidCalParam.maxOutputOfPID;
+		pPidInfo->minOutput = stPidCalParam.minOutputOfPID;
+		pPidInfo->maxIntegralOutput = stPidCalParam.maxIntegralOutput;
+		pPidInfo->minIntegralOutput = stPidCalParam.minIntegralOutput;
+		pPidInfo->threshold = stPidCalParam.integralSeparationThreshold;	
+		pPidInfo->TargetTemp = stPidCalParam.targetTemperature;		  			
+	}	
+	return ret;	
+}
+

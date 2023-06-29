@@ -1,0 +1,114 @@
+/**
+  ******************************************************************************
+  * @file    eepromDeal.h
+  * @author  Firmware-Team
+  * @version V1.0.0
+  * @date    13-06-2016
+  * @brief
+  ******************************************************************************
+**/
+
+#ifndef  __EEPROMDEAL__
+#define  __EEPROMDEAL__
+
+/*
+*********************************************************************************************************
+*                                              INCLUDE FILES
+*********************************************************************************************************
+*/
+#include "stm32f3xx_hal.h"
+
+/*
+*********************************************************************************************************
+*                                               INT DEFINES
+*********************************************************************************************************
+*/
+//开放给应用层的参数定义区域
+#define USER_DEF_START								PROGRAMETER_ADDR_START
+//example
+#define PID_DEF										USER_DEF_START    		//SIZE 10 byte
+#define CAMERA_DEF									(PID_DEF + 10)         			//SIZE 20 byte
+#define TEMP_DEF									(CAMERA_DEF + 246)
+#define LASER_DEF									(TEMP_DEF + 20)		 		//SIZE 30 byte
+
+#define USER_DEF_END								(LASER_DEF + 30)
+
+
+
+typedef enum
+{
+  EEPROM_INIT_OK = 0,
+  EEPROM_INIT_FALSE,
+  EEPROM_HAL_BUSY,
+  EEPROM_HAL_ERR,
+  EEPROM_PROMGRAM_BUFF_ERR,
+  EEPROM_PROMGRAM_LEN_ERR,
+  EEPROM_WRITE_OUT_OF_RANGE,
+  EEPROM_PROGRAM_WRITE_OK,
+  EEPROM_READ_OUT_OF_RANGE,
+  EEPROM_PROGRAM_READ_ERR,
+  EEPROM_BAD_BLOCK_ERR,
+  EEPROM_PROGRAM_READ_OK,
+  EEPROM_PROGRAM_LOG_INDEX_DEFAULT_ERR,
+  EEPROM_LOG_INDEX_DEFAULT_INFO_GET_OK,
+  EEPROM_PROGRAM_BADBLOCK_ERR,
+  EEPROM_BEABLOCK_WRITE_OK,
+  EEPROM_BEABLOCK_ERR,
+  EEPROM_BEABLOCK_READ_OK,
+  EEPROM_LOG_INDEX_INFO_INPUT_TEMP_ERR,
+  EEPROM_LOG_INDEX_INFO_WRITE_OUT_OF_RANGE,
+  EEPROM_LOG_INDEX_INFO_WRITE_OK,
+  EEPROM_LOG_INDEX_INFO_READ_FALSE,
+  EEPROM_LOG_INDEX_INFO_READ_OK,
+  EEPROM_LOG_INFO_WRITE_PROGAM_ERR,
+  EEPROM_LOG_INFO_WRITE_OK,
+  EEPROM_LOG_READ_INDEX_PROGRAM_ERR,
+  EEPROM_LOG_INFO_READ_PROGAM_ERR,
+  EEPROM_LOG_INFO_READ_OUT_OF_RANGE,
+  EEPROM_LOG_INFO_READ_FALSE,
+  EEPROM_LOG_INFO_READ_OK,
+  EEPROM_LOG_OUT_OF_RANGE,
+  EEPROM_LOG_SAVE_OK,
+  EEPROM_LOG_READ_OUT_OF_RANGE,
+  EEPROM_LOG_READ_BUFF_ERROR,
+  EEPROM_LOG_READ_OK
+} EepromStatusDef;
+
+/*
+*********************************************************************************************************
+*                                        LOCAL GLOBAL VARIABLES
+*********************************************************************************************************
+*/
+__packed
+typedef struct
+{
+  u32 LogIndex;		//日志索引序号
+  u32 LogType;		//日志类型
+  u32 LogTime;		//日志时间
+  u8 LogMsg[114]; //日志内容
+  u16 CheckSum;
+} LogInfoDef;
+/*
+*********************************************************************************************************
+*                                           FUNCTION PROTOTYPES
+*********************************************************************************************************
+*/
+extern EepromStatusDef EepromInit( BspI2cHandle* pBspI2cHandle );
+extern EepromStatusDef EepromWriteProgramter( u32 EepromWriteAddr, u8* InputBuff, u32 Lenth );
+extern EepromStatusDef EepromReadProgramter( u32 EepromReadAddr, u8* OutputBuff, u32 Lenth );
+extern EepromStatusDef EepromSaveLog( u32 LogType, const char *pLogMsg, ... );
+extern EepromStatusDef EepromReadLog( u32 LogReadIndex, u8 *pReadBuff, u32 *OutputLen );
+
+extern void EepromTest( void );
+
+/*
+*********************************************************************************************************
+*                                             MODULE END
+*********************************************************************************************************
+*/
+
+
+
+
+#endif /* End */
+

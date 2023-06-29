@@ -1,0 +1,275 @@
+/**
+  ******************************************************************************
+  * @file    i2cTask.c
+  * @author  Firmware-Team
+  * @version V1.0.0
+  * @date    13-06-2016
+  * @brief   
+  ******************************************************************************
+**/
+/*
+*********************************************************************************************************
+*                                             INCLUDE FILES
+*********************************************************************************************************
+*/
+#include  <includes.h>
+
+
+/*
+*********************************************************************************************************
+*                                               INT DEFINES
+*********************************************************************************************************
+*/
+/*i2c1************************************************************************/
+#define EEPROM_ADDR_SIZE	I2C_MEMADD_SIZE_16BIT
+
+#define I2C_ADDRESS        0xA0u
+
+/* I2C TIMING Register define when I2C clock source is SYSCLK */
+/* I2C TIMING is calculated in case of the I2C Clock source is the SYSCLK = 72 MHz */
+/* This example use TIMING to 0x00C4092A to reach 1 MHz speed (Rise time = 26ns, Fall time = 2ns) */
+#define I2C_TIMING      0x00C4092A 
+	
+#define I2C1_HAL_PORT                    I2C1
+#define I2C1_CLK_ENABLE()                __HAL_RCC_I2C1_CLK_ENABLE()
+#define I2C1_SDA_GPIO_CLK_ENABLE()       __HAL_RCC_GPIOB_CLK_ENABLE()
+#define I2C1_SCL_GPIO_CLK_ENABLE()       __HAL_RCC_GPIOB_CLK_ENABLE() 
+	
+#define I2C1_FORCE_RESET()               __HAL_RCC_I2C1_FORCE_RESET()
+#define I2C1_RELEASE_RESET()             __HAL_RCC_I2C1_RELEASE_RESET()
+	
+	/* Definition for I2Cx Pins */
+
+#define I2C1_SCL_GPIO_PORT              GPIOB
+#define I2C1_SCL_PIN                    GPIO_PIN_6
+#define I2C1_SCL_MODE	   				GPIO_MODE_AF_OD;
+#define I2C1_SCL_PULL	   				GPIO_PULLUP;
+#define I2C1_SCL_SPEED	   				GPIO_SPEED_FREQ_HIGH;
+#define I2C1_SCL_AF                     GPIO_AF4_I2C1
+
+#define I2C1_SDA_GPIO_PORT              GPIOB
+#define I2C1_SDA_PIN                    GPIO_PIN_7
+#define I2C1_SDA_MODE	  				GPIO_MODE_AF_OD;
+#define I2C1_SDA_PULL	  				GPIO_PULLUP;
+#define I2C1_SDA_SPEED	  				GPIO_SPEED_FREQ_HIGH;
+#define I2C1_SDA_AF                     GPIO_AF4_I2C1
+	
+	/* Definition for I2Cx's NVIC */
+#define I2C1_EV_IRQn_HAL                I2C1_EV_IRQn
+#define I2C1_EV_PREEMPT_PRIORITY		0
+#define I2C1_EV_SUB_PRIORITY			1
+
+#define I2C1_ER_IRQn_HAL                I2C1_ER_IRQn
+#define I2C1_ER_PREEMPT_PRIORITY		0
+#define I2C1_ER_SUB_PRIORITY			0
+
+
+
+#define I2C1_BUFF_SIZE					257
+/*
+*********************************************************************************************************
+*                                            LOCAL DEFINES
+*********************************************************************************************************
+*/
+
+
+/*
+*********************************************************************************************************
+*                                        LOCAL GLOBAL VARIABLES
+*********************************************************************************************************
+*/
+static u8 gI2c1RxBuff[I2C1_BUFF_SIZE];
+static u8 gI2c1TxBuff[I2C1_BUFF_SIZE];
+
+Queue stI2c1RxQueue,stI2c1TxQueue;
+
+
+BspI2cHandle I2c1Handle,I2c3Handle;
+
+
+/*
+*********************************************************************************************************
+*                                         FUNCTION PROTOTYPES
+*********************************************************************************************************
+*/
+
+static void I2C1ClkEnable(void)
+{
+	I2C1_CLK_ENABLE();
+}
+
+static void I2C1SclGpioClkEnable(void)
+{
+	I2C1_SCL_GPIO_CLK_ENABLE();
+}
+
+static void I2C1SdaGpioClkEnable(void)
+{
+	I2C1_SDA_GPIO_CLK_ENABLE();
+}
+
+static void I2C1ForceReset(void)
+{
+	I2C1_FORCE_RESET();
+}
+
+static void I2C1ReleaseReset(void)
+{
+	I2C1_RELEASE_RESET();
+}
+
+void I2C1Config(void)
+{
+	/*##-1- Configure the I2C peripheral #######################################*/
+
+	I2c1Handle.I2cHandleInit.Instance 				= I2C1_HAL_PORT;
+	
+	I2c1Handle.I2cHandleInit.Init.AddressingMode	= I2C_ADDRESSINGMODE_7BIT;
+	I2c1Handle.I2cHandleInit.Init.Timing          	= I2C_TIMING;
+	//I2c1Handle.I2cHandleInit.Init.ClockSpeed	   	= 400000;
+	I2c1Handle.I2cHandleInit.Init.DualAddressMode 	= I2C_DUALADDRESS_DISABLE;
+	//I2c1Handle.I2cHandleInit.Init.DutyCycle	   		= I2C_DUTYCYCLE_16_9;
+	I2c1Handle.I2cHandleInit.Init.GeneralCallMode 	= I2C_GENERALCALL_DISABLE;
+	I2c1Handle.I2cHandleInit.Init.NoStretchMode		= I2C_NOSTRETCH_DISABLE;
+	I2c1Handle.I2cHandleInit.Init.OwnAddress1    	= I2C_ADDRESS;//0x00;
+	I2c1Handle.I2cHandleInit.Init.OwnAddress2    	= 0x00;
+	
+	I2c1Handle.SdaGpioInit.Pin						= I2C1_SDA_PIN;
+	I2c1Handle.SdaGpioInit.Mode						= I2C1_SDA_MODE;
+	I2c1Handle.SdaGpioInit.Pull						= I2C1_SDA_PULL;
+	I2c1Handle.SdaGpioInit.Speed					= I2C1_SDA_SPEED;
+	I2c1Handle.SdaGpioInit.Alternate				= I2C1_SDA_AF;
+
+	I2c1Handle.SclGpioInit.Pin						= I2C1_SCL_PIN;
+	I2c1Handle.SclGpioInit.Mode						= I2C1_SCL_MODE;
+	I2c1Handle.SclGpioInit.Pull						= I2C1_SCL_PULL;
+	I2c1Handle.SclGpioInit.Speed					= I2C1_SCL_SPEED;
+	I2c1Handle.SclGpioInit.Alternate				= I2C1_SCL_AF;
+
+	I2c1Handle.I2cPortInit.SdaGpioPort				= I2C1_SDA_GPIO_PORT;
+	I2c1Handle.I2cPortInit.SclGpioPort				= I2C1_SCL_GPIO_PORT;
+
+	I2c1Handle.I2cClkSet.ftPortClkEnable			= I2C1ClkEnable;
+	I2c1Handle.I2cClkSet.ftSdaGpioClkEnable			= I2C1SdaGpioClkEnable;
+	I2c1Handle.I2cClkSet.ftSclpioClkEnable			= I2C1SclGpioClkEnable;
+	I2c1Handle.I2cClkSet.ftPortForceReset			= I2C1ForceReset;
+	I2c1Handle.I2cClkSet.ftPortReleaseReset			= I2C1ReleaseReset;
+
+	I2c1Handle.IrqInit.ErIrqn						= I2C1_EV_IRQn_HAL;
+	I2c1Handle.IrqInit.ErPreemptPriority			= I2C1_EV_PREEMPT_PRIORITY;
+	I2c1Handle.IrqInit.ErSubPriority				= I2C1_EV_SUB_PRIORITY;
+	I2c1Handle.IrqInit.EvIrqn						= I2C1_ER_IRQn_HAL;
+	I2c1Handle.IrqInit.EvPreemptPriority			= I2C1_ER_PREEMPT_PRIORITY;
+	I2c1Handle.IrqInit.EvSubPriority				= I2C1_ER_SUB_PRIORITY;
+
+	I2c1Handle.I2cType								= MASTER_I2C;
+
+	I2c1Handle.I2cFlag.TxCpltFlag					= true;
+	I2c1Handle.I2cFlag.RxCpltFlag					= true;
+	I2c1Handle.I2cFlag.TxQueueOverFlag				= false;
+	I2c1Handle.I2cFlag.RxQueueOverFlag				= false;
+	I2c1Handle.I2cFlag.RxHalErrorFlag				= false;
+	I2c1Handle.I2cFlag.TxHalErrorFlag				= false;
+
+	I2c1Handle.I2cQuque.RxQueue						= &stI2c1RxQueue;
+	I2c1Handle.I2cQuque.RxBuff						= gI2c1RxBuff;
+	I2c1Handle.I2cQuque.RxBuffSize					= I2C1_BUFF_SIZE;
+	I2c1Handle.I2cQuque.TxQueue						= &stI2c1TxQueue;
+	I2c1Handle.I2cQuque.TxBuff						= gI2c1TxBuff;
+	I2c1Handle.I2cQuque.TxBuffSize					= I2C1_BUFF_SIZE;
+	
+	if(BspI2cHandleInit(&I2c1Handle) != HAL_OK)
+	{
+	  /* Initialization Error */
+	  SaveLog(NULL,0);	  
+	}
+	else
+	{
+	}
+
+}
+
+
+void I2c1Test(void)
+{
+	u8 Txbuff[10];
+	u8 Rxbuff[10];
+	static u32 EEpromAdr = 0;
+	static u32 EEpromTestTimes = 0;
+	u32 readLen;
+	Rxbuff[0] = 0;
+
+	//Txbuff[0] = I2C_MEM_ADD_HSB(EEpromAdr);
+	//Txbuff[1] = I2C_MEM_ADD_MSB(EEpromAdr);
+	//Txbuff[2] = I2C_MEM_ADD_LSB(EEpromAdr);
+	Txbuff[0] = EEpromAdr % 256;
+	/*##-2- Start the transmission process #####################################*/	
+	/* While the I2C in reception process, user can transmit data through 
+	 "aTxBuffer" buffer */
+	while(BspI2cMemTransmitIT(&I2c1Handle, (uint16_t)I2C_ADDRESS, EEpromAdr,EEPROM_ADDR_SIZE,(uint8_t*)Txbuff, 1)!= HAL_OK)
+	{
+	/* SaveLog() function is called when Timeout error occurs.
+	   When Acknowledge failure occurs (Slave don't acknowledge it's address)
+	   Master restarts communication */
+		if (HAL_I2C_GetError(&I2c1Handle.I2cHandleInit) != HAL_I2C_ERROR_AF)
+		{
+		  SaveLog(NULL,0);
+		}
+	}
+	  /*##-3- Wait for the end of the transfer ###################################*/  
+	/*	Before starting a new communication transfer, you need to check the current   
+	  state of the peripheral; if it’s busy you need to wait for the end of current
+	  transfer before starting a new one.
+	  For simplicity reasons, this example is just waiting till the end of the 
+	  transfer, but application may perform other tasks while transfer operation
+	  is ongoing. */  
+	while (I2c1Handle.I2cFlag.TxCpltFlag != true)
+	{
+	}
+
+	//CPU_CRITICAL_ENTER();
+	  /*##-4- Put I2C peripheral in reception process ############################*/  
+	while(BspI2cMemRecieveIT(&I2c1Handle, (uint16_t)I2C_ADDRESS, EEpromAdr,EEPROM_ADDR_SIZE,(uint8_t*)Rxbuff, 1,&readLen)!= HAL_OK)
+	{
+	/* SaveLog() function is called when Timeout error occurs.
+	   When Acknowledge failure occurs (Slave don't acknowledge it's address)
+	   Master restarts communication */
+		if (HAL_I2C_GetError(&I2c1Handle.I2cHandleInit) != HAL_I2C_ERROR_AF)
+		{
+		  SaveLog(NULL,0);
+		}	
+	}
+	//CPU_CRITICAL_EXIT();
+	
+	/*##-5- Wait for the end of the transfer ###################################*/	
+	/*	Before starting a new communication transfer, you need to check the current   
+	  state of the peripheral; if it¡¯s busy you need to wait for the end of current
+	  transfer before starting a new one.
+	  For simplicity reasons, this example is just waiting till the end of the 
+	  transfer, but application may perform other tasks while transfer operation
+	  is ongoing. */  
+	while (I2c1Handle.I2cFlag.RxCpltFlag != true)
+	{
+	} 
+
+	/*##-6- Compare the sent and received buffers ##############################*/
+	if(Buffercmp((uint8_t*)Txbuff,(uint8_t*)Rxbuff,1))
+	{
+		/* Processing Error */
+		SaveLog(NULL,0);	   
+	}
+	if(EEpromAdr++ >= 32768)
+	{
+		EEpromTestTimes ++;
+		if(EEpromTestTimes == 100)
+		{
+			EEpromTestTimes = 0;
+		}
+		EEpromAdr = 0;
+	}
+	
+}
+
+
+
+

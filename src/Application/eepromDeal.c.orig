@@ -1,0 +1,894 @@
+/**
+  ******************************************************************************
+  * @file    eepromDeal.c
+  * @author  Firmware-Team
+  * @version V1.0.0
+  * @date    13-06-2016
+  * @brief   
+  ******************************************************************************
+**/
+/*
+*********************************************************************************************************
+*                                             INCLUDE FILES
+*********************************************************************************************************
+*/
+#include <includes.h>
+#include <string.h>
+
+/*
+*********************************************************************************************************
+*                                               INT DEFINES
+*********************************************************************************************************
+*/
+#define EEPROM_ADDRESS								(0xA0u)
+#define EEPROM_ADDR_SIZE							(I2C_MEMADD_SIZE_16BIT)
+#define EEPROM_TIME_OUT								(1000u) 	//ms
+#define EEPROM_SIZE									(256 * 1024u)					//单位byte，eeprom的大小
+#define EEPROM_ADDR_START							(0)
+
+/*参数保存区域*/
+//from 0 to 2047,size 2k byte
+#define PROGRAMETER_DEF_SIZE						(1024 * 5u) 
+#define PROGRAMETER_ADDR_START						EEPROM_ADDR_START				//参数定义开始地址
+#define PROGRAMETER_ADDR_END						USER_DEF_END					//参数定义结束地址
+
+#if (PROGRAMETER_ADDR_END > (PROGRAMETER_ADDR_START + PROGRAMETER_DEF_SIZE - 1))	//最后一个字节不写
+	#error PROGRAMETER_ADDR_END is out of range;
+#endif
+
+/*日志索引保存区域*/
+#define LOG_INDEX_INFO_SIZE							(1024 * 1u)
+#define LOG_INDEX_INFO_ADDR_START	  				PROGRAMETER_ADDR_START + PROGRAMETER_DEF_SIZE	//索引区域开始地址
+#define LOG_INDEX_INFO_BAD_BLOCK_NUM				LOG_INDEX_INFO_ADDR_START  + 10     //SIZE 6 byte   //索引区域坏块个数记录地址
+#define LOG_INDEX_INFO_DETAIL_START					LOG_INDEX_INFO_BAD_BLOCK_NUM + 6				//索引详细信息开始地址					
+
+#define LOG_INDEX_INFO_ADDR_END						LOG_INDEX_INFO_ADDR_START + LOG_INDEX_INFO_SIZE - 1   //索引区域结束地址,最后一个字节不写
+
+#if (LOG_INDEX_INFO_ADDR_END > ( PROGRAMETER_DEF_SIZE +  LOG_INDEX_INFO_SIZE - 1))
+	#error LOG_INDEX_INFO_ADDR_END is out of range;
+#endif
+
+
+
+/*日志保存区域*/
+#define LOG_INFO_SIZE								(EEPROM_SIZE - PROGRAMETER_DEF_SIZE - LOG_INDEX_INFO_SIZE)  //日志区域大小
+#define LOG_INFO_ADDR_START	  						LOG_INDEX_INFO_ADDR_START + LOG_INDEX_INFO_SIZE				//日志开始地址
+
+#define LOG_INDEX_ADDR_END							(LOG_INFO_ADDR_START + LOG_INFO_SIZE)					//日志结束地址
+
+#if (LOG_INDEX_ADDR_END > (EEPROM_SIZE))
+	#error LOG_INDEX_ADDR_END is out of range;
+#endif
+
+/*日志保存相关参数*/
+#define LOG_PER_LEN									128									//日志固定长度（byte）
+#define LOG_NUMBER_MAX								LOG_INFO_SIZE / LOG_PER_LEN 		//日志最大个数
+/*
+*********************************************************************************************************
+*                                            LOCAL DEFINES
+*********************************************************************************************************
+*/
+
+
+/*
+*********************************************************************************************************
+*                                        LOCAL GLOBAL VARIABLES
+*********************************************************************************************************
+*/
+__packed
+typedef struct
+{
+	u32 BadBlockNumber;   //记录索引区的坏块
+	u16 CheckSum;
+}LogIndexInfoBadBlockDef;
+__packed
+typedef struct
+{
+	u32 CurrentLogIndex;   //当前日志的索引序号
+	u32 CurrentLogSaveAddr; //当前日志保存地址
+	u16 CheckSum;
+}LogIndexInfoDef;
+LogIndexInfoDef LogIndexInfo;
+
+LogInfoDef LogInfo;
+
+BspI2cHandle *EepromHandle;
+/*
+*********************************************************************************************************
+*                                         FUNCTION PROTOTYPES
+*********************************************************************************************************
+*/
+static BspStatusTypeDef EepromTransmitIT(BspI2cHandle *InputI2cHandle,u16 DevAddress,u32 MemAddress,u32 MemAddSize,u8 *TxBuff,u32 TxLen)
+{
+	BspStatusTypeDef BspStatus;
+	if(MemAddress >> 0x10 > 0)
+	{	
+		DevAddress |= ((MemAddress >> 0x10) & 0x0003) << 1;
+	}
+	BspStatus = BspI2cMemTransmitIT(InputI2cHandle,DevAddress,MemAddress,MemAddSize,TxBuff,TxLen);
+	return BspStatus;
+}
+
+static BspStatusTypeDef EepromRecieveIT(BspI2cHandle *InputI2cHandle,u16 DevAddress,u32 MemAddress,u32 MemAddSize,u8 *RxBuff,u32 RxLen,u32 *OutPutLen)
+{
+	BspStatusTypeDef BspStatus;
+	if(MemAddress >> 0x10 > 0)
+	{	
+		DevAddress |= ((MemAddress >> 0x10) & 0x0003) << 1;
+	}
+	BspStatus = BspI2cMemRecieveIT(InputI2cHandle,DevAddress,MemAddress,MemAddSize,RxBuff,RxLen,OutPutLen);
+	return BspStatus;
+}
+
+static EepromStatusDef LogIndexDefaultInfo(LogIndexInfoDef *LogIndexInfoTemp)
+{
+	if(LogIndexInfoTemp == NULL)
+	{
+		return EEPROM_PROGRAM_LOG_INDEX_DEFAULT_ERR;
+	}
+	LogIndexInfoTemp->CurrentLogIndex = 0;
+	LogIndexInfoTemp->CurrentLogSaveAddr = 0;
+	LogIndexInfoTemp->CheckSum = crcFast((u8*)LogIndexInfoTemp,sizeof(LogIndexInfoDef) - 2);
+	return EEPROM_LOG_INDEX_DEFAULT_INFO_GET_OK;
+}
+
+static EepromStatusDef LogIndexInfoWriteBadblockNum(LogIndexInfoBadBlockDef *LogIndexInfoBadBlockTemp)
+{
+	u32 tickStart;
+	u32 len;
+	
+	if(LogIndexInfoBadBlockTemp == NULL)
+	{
+		return EEPROM_PROGRAM_BADBLOCK_ERR;
+	}
+	
+	len = sizeof(LogIndexInfoBadBlockDef);
+	LogIndexInfoBadBlockTemp->CheckSum = crcFast((u8*)LogIndexInfoBadBlockTemp,len - 2);
+	
+	tickStart = HAL_GetTick();
+	while (EepromHandle->I2cFlag.TxCpltFlag != true)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			return EEPROM_HAL_BUSY;
+		}
+	}
+	
+	tickStart = HAL_GetTick();
+	
+	while(EepromTransmitIT(EepromHandle, (uint16_t)EEPROM_ADDRESS, LOG_INDEX_INFO_BAD_BLOCK_NUM,EEPROM_ADDR_SIZE, (uint8_t*)LogIndexInfoBadBlockTemp, sizeof(LogIndexInfoBadBlockDef))!= HAL_OK)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			SaveLog(NULL,0);
+			return EEPROM_HAL_ERR;
+		}
+	}
+	
+	tickStart = HAL_GetTick();
+	while (EepromHandle->I2cFlag.TxCpltFlag != true)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			return EEPROM_HAL_BUSY;
+		}
+	}
+	
+	return EEPROM_BEABLOCK_WRITE_OK;
+}
+
+static EepromStatusDef LogIndexInfoReadBadblocNum(LogIndexInfoBadBlockDef *LogIndexInfoBadBlockTemp)
+{
+	u16 checkSum;
+	u32 tickStart,readLen;
+	
+	if(LogIndexInfoBadBlockTemp == NULL)
+	{
+		return EEPROM_PROGRAM_BADBLOCK_ERR;
+	}
+	
+	tickStart = HAL_GetTick();
+	while (EepromHandle->I2cFlag.RxCpltFlag != true)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			return EEPROM_HAL_BUSY;
+		}
+	}
+	
+	tickStart = HAL_GetTick();	
+	while(EepromRecieveIT(EepromHandle, (uint16_t)EEPROM_ADDRESS, LOG_INDEX_INFO_BAD_BLOCK_NUM,EEPROM_ADDR_SIZE, (uint8_t*)LogIndexInfoBadBlockTemp, sizeof(LogIndexInfoBadBlockDef),&readLen)!= HAL_OK)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			SaveLog(NULL,0);
+			return EEPROM_HAL_ERR;
+		}
+	}
+	
+	tickStart = HAL_GetTick();
+	while (EepromHandle->I2cFlag.RxCpltFlag != true)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			return EEPROM_HAL_BUSY;
+		}
+	}
+	
+	checkSum = crcFast((u8*)LogIndexInfoBadBlockTemp,sizeof(LogIndexInfoBadBlockDef) - 2);
+	
+	if(LogIndexInfoBadBlockTemp->CheckSum != checkSum)
+	{
+		return EEPROM_BEABLOCK_ERR;
+	}
+	
+	return EEPROM_BEABLOCK_READ_OK;
+}
+
+static EepromStatusDef LogIndexInfoWrite(LogIndexInfoDef *pLogIndexInfoTemp)
+{
+	u32 tickStart,logIndexInfoWriteAddr;
+	//LogIndexInfoDef LogIndexInfoBuff;
+	LogIndexInfoBadBlockDef LogIndexInfoBadBlockBuff;
+	EepromStatusDef EepromStatus;
+	
+	if(pLogIndexInfoTemp == NULL)
+	{
+		return EEPROM_LOG_INDEX_INFO_INPUT_TEMP_ERR;
+	}
+	
+	//读出索引区的坏块
+	EepromStatus = LogIndexInfoReadBadblocNum(&LogIndexInfoBadBlockBuff);
+	
+	if(EepromStatus != EEPROM_BEABLOCK_READ_OK)
+	{
+		return EepromStatus;
+	}
+	//计算索引区保存地址
+	logIndexInfoWriteAddr = LogIndexInfoBadBlockBuff.BadBlockNumber * sizeof(LogIndexInfoDef) + LOG_INDEX_INFO_DETAIL_START;
+	
+	//超出索引区范围
+	if((logIndexInfoWriteAddr + sizeof(LogIndexInfoDef)) > LOG_INDEX_INFO_ADDR_END)
+	{
+		return EEPROM_LOG_INDEX_INFO_WRITE_OUT_OF_RANGE;
+	}
+	
+	//保存索引信息
+	tickStart = HAL_GetTick();	
+	while (EepromHandle->I2cFlag.TxCpltFlag != true)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			return EEPROM_HAL_BUSY;
+		}
+	}
+	//计算校验和
+	pLogIndexInfoTemp->CheckSum = crcFast((u8*)pLogIndexInfoTemp,sizeof(LogIndexInfoDef)-2);
+	
+	tickStart = HAL_GetTick();
+
+	while(EepromTransmitIT(EepromHandle, (uint16_t)EEPROM_ADDRESS, logIndexInfoWriteAddr,EEPROM_ADDR_SIZE,(uint8_t*)pLogIndexInfoTemp, sizeof(LogIndexInfoDef))!= HAL_OK)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			SaveLog(NULL,0);
+			return EEPROM_HAL_ERR;
+		}
+	}
+	
+	tickStart = HAL_GetTick();
+	while (EepromHandle->I2cFlag.TxCpltFlag != true)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			return EEPROM_HAL_BUSY;
+		}
+	}
+	
+	return EEPROM_LOG_INDEX_INFO_WRITE_OK;
+}
+
+static EepromStatusDef LogIndexInfoRead(LogIndexInfoDef* pLogIndexInfoTemp)
+{
+	u16 checkSum;
+	u32 tickStart,readLen,logIndexInfoReadAddr;
+	LogIndexInfoBadBlockDef LogIndexInfoBadBlockBuff;
+	EepromStatusDef EepromStatus;
+	
+	if(pLogIndexInfoTemp == NULL)
+	{
+		return EEPROM_LOG_INDEX_INFO_INPUT_TEMP_ERR;
+	}
+	
+	EepromStatus = LogIndexInfoReadBadblocNum(&LogIndexInfoBadBlockBuff);
+
+	if(EepromStatus != EEPROM_BEABLOCK_READ_OK)
+	{
+		return EepromStatus;
+	}
+	
+	logIndexInfoReadAddr = LogIndexInfoBadBlockBuff.BadBlockNumber * sizeof(LogIndexInfoDef) + LOG_INDEX_INFO_DETAIL_START;
+	
+	if((logIndexInfoReadAddr + sizeof(LogIndexInfoDef)) > LOG_INDEX_INFO_ADDR_END)
+	{
+		return EEPROM_LOG_INDEX_INFO_WRITE_OUT_OF_RANGE;
+	}
+	
+	//读取索引信息
+	tickStart = HAL_GetTick();	
+	while (EepromHandle->I2cFlag.RxCpltFlag != true)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			return EEPROM_HAL_BUSY;
+		}
+	}
+	
+	tickStart = HAL_GetTick();
+	while(EepromRecieveIT(EepromHandle, (uint16_t)EEPROM_ADDRESS, logIndexInfoReadAddr,EEPROM_ADDR_SIZE,(uint8_t*)pLogIndexInfoTemp, sizeof(LogIndexInfoDef),&readLen)!= HAL_OK)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			SaveLog(NULL,0);
+			return EEPROM_HAL_ERR;
+		}
+	}
+	
+	tickStart = HAL_GetTick();	
+	while (EepromHandle->I2cFlag.RxCpltFlag != true)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			return EEPROM_HAL_BUSY;
+		}
+	}
+	
+		//计算校验和
+	checkSum = crcFast((u8*)pLogIndexInfoTemp,sizeof(LogIndexInfoDef)-2);
+	
+	//出现坏块处理
+	if(pLogIndexInfoTemp->CheckSum != checkSum)
+	{
+		LogIndexInfoBadBlockBuff.BadBlockNumber++;
+		
+		EepromStatus = LogIndexInfoWriteBadblockNum(&LogIndexInfoBadBlockBuff);
+		if(EepromStatus != EEPROM_BEABLOCK_WRITE_OK)
+		{
+			return EepromStatus;
+		}
+		//重新保存索引，数据已经重新计算，已存数据丢失
+		LogIndexDefaultInfo(pLogIndexInfoTemp);
+		EepromStatus = LogIndexInfoWrite(pLogIndexInfoTemp);
+		if(EepromStatus != EEPROM_LOG_INDEX_INFO_WRITE_OK)
+		{
+			return EepromStatus;
+		}
+		else
+		{
+			return EEPROM_LOG_INDEX_INFO_READ_FALSE;
+		}
+	}
+	
+	return EEPROM_LOG_INDEX_INFO_READ_OK;
+}
+
+/*
+*********************************************************************************************************
+*                                          EepromInit
+*
+* Description : EepromInit eeprom 初始化
+*
+* Arguments   : pBspI2cHandle 初始化好i2c驱动后，把句柄传入
+*				
+*
+* Returns     : EepromStatusDef
+*
+* Notes       :初始化本函数前，必须先初始化i2c通讯。
+*********************************************************************************************************
+*/
+EepromStatusDef EepromInit(BspI2cHandle* pBspI2cHandle)
+{
+	LogIndexInfoBadBlockDef LogIndexInfoBadBlockBuf;
+	EepromStatusDef EepromStatus;
+	EepromHandle = pBspI2cHandle;
+	
+	//初始化坏块记录区
+	EepromStatus = LogIndexInfoReadBadblocNum(&LogIndexInfoBadBlockBuf);
+	
+	if(EepromStatus == EEPROM_BEABLOCK_ERR)
+	{
+		LogIndexInfoBadBlockBuf.BadBlockNumber = 0;
+		EepromStatus = LogIndexInfoWriteBadblockNum(&LogIndexInfoBadBlockBuf);
+		if(EepromStatus != EEPROM_BEABLOCK_WRITE_OK)
+		{
+			return EepromStatus;
+		}
+	}
+	else if(EepromStatus != EEPROM_BEABLOCK_READ_OK)
+	{
+		return EepromStatus;
+	}
+	else
+	{
+	}
+	return EEPROM_INIT_OK;
+}
+
+
+static EepromStatusDef LogInfoWrite(LogInfoDef *pLogInfoTemp)
+{
+	u32 tickStart,logInfoWriteAddr,len;
+	EepromStatusDef EepromStatus;
+	LogIndexInfoDef LogIndexInfoBuf;
+	
+	if(pLogInfoTemp == NULL)
+	{
+		return EEPROM_LOG_INFO_WRITE_PROGAM_ERR;
+	}
+	
+	EepromStatus = LogIndexInfoRead(&LogIndexInfoBuf);
+	if(EepromStatus != EEPROM_LOG_INDEX_INFO_READ_OK)
+	{
+		return EepromStatus;
+	}
+	
+	logInfoWriteAddr = LogIndexInfoBuf.CurrentLogSaveAddr * sizeof(LogInfoDef) + LOG_INFO_ADDR_START;
+	
+	//重头写入
+	if(logInfoWriteAddr + sizeof(LogInfoDef) > LOG_INDEX_ADDR_END)
+	{
+		logInfoWriteAddr = LOG_INFO_ADDR_START;
+		LogIndexInfoBuf.CurrentLogSaveAddr = 0;
+	}
+	
+	
+		//保存日志信息
+	tickStart = HAL_GetTick();	
+	while (EepromHandle->I2cFlag.TxCpltFlag != true)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			return EEPROM_HAL_BUSY;
+		}
+	}
+	
+	pLogInfoTemp->LogIndex = LogIndexInfoBuf.CurrentLogIndex;
+	
+	//计算校验和
+	pLogInfoTemp->CheckSum = crcFast((u8*)pLogInfoTemp,sizeof(LogInfoDef)-2);
+	
+	tickStart = HAL_GetTick();
+
+	len = sizeof(LogInfoDef);
+	while(EepromTransmitIT(EepromHandle, (uint16_t)EEPROM_ADDRESS, logInfoWriteAddr,EEPROM_ADDR_SIZE,(uint8_t*)pLogInfoTemp, len)!= HAL_OK)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			SaveLog(NULL,0);
+			return EEPROM_HAL_ERR;
+		}
+	}
+	
+	tickStart = HAL_GetTick();
+	while (EepromHandle->I2cFlag.TxCpltFlag != true)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			return EEPROM_HAL_BUSY;
+		}
+	}
+	//最后才保存索引
+	LogIndexInfoBuf.CurrentLogIndex ++;
+	LogIndexInfoBuf.CurrentLogSaveAddr ++;
+	EepromStatus = LogIndexInfoWrite(&LogIndexInfoBuf);
+	if(EepromStatus != EEPROM_LOG_INDEX_INFO_WRITE_OK)
+	{
+		return EepromStatus;
+	}
+	
+	return EEPROM_LOG_INFO_WRITE_OK;
+}
+
+
+static EepromStatusDef LogInfoRead(u32 LogReadIndex, LogInfoDef *pLogInfoTemp)
+{
+	u16 checkSum;
+	u32 tickStart,logInfoReadAddr,readLen;
+	
+	if(pLogInfoTemp == NULL)
+	{
+		return EEPROM_LOG_INFO_READ_PROGAM_ERR;
+	}
+	
+	logInfoReadAddr = LogReadIndex * sizeof(LogInfoDef) + LOG_INFO_ADDR_START;
+	
+	if(logInfoReadAddr + sizeof(LogInfoDef) > LOG_INDEX_ADDR_END)
+	{
+		return EEPROM_LOG_INFO_READ_OUT_OF_RANGE;
+	}
+	
+	tickStart = HAL_GetTick();	
+	while (EepromHandle->I2cFlag.RxCpltFlag != true)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			return EEPROM_HAL_BUSY;
+		}
+	}
+	
+	tickStart = HAL_GetTick();
+	while(EepromRecieveIT(EepromHandle, (uint16_t)EEPROM_ADDRESS, logInfoReadAddr,EEPROM_ADDR_SIZE,(uint8_t*)pLogInfoTemp, sizeof(LogInfoDef),&readLen)!= HAL_OK)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			SaveLog(NULL,0);
+			return EEPROM_HAL_ERR;
+		}
+	}
+	
+	tickStart = HAL_GetTick();	
+	while (EepromHandle->I2cFlag.RxCpltFlag != true)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			return EEPROM_HAL_BUSY;
+		}
+	}
+	
+	//计算校验和
+	checkSum = crcFast((u8*)pLogInfoTemp,sizeof(LogInfoDef)-2);
+	
+	if(checkSum != pLogInfoTemp->CheckSum)
+	{
+		return EEPROM_LOG_INFO_READ_FALSE;
+	}
+
+	return EEPROM_LOG_INFO_READ_OK;
+}
+
+char  HexToASCII(unsigned char  data_hex)
+{ 
+ char  ASCII_Data;
+ ASCII_Data=data_hex & 0x0F;
+ if(ASCII_Data<10) 
+  ASCII_Data=ASCII_Data+0x30; 
+ else  
+  ASCII_Data=ASCII_Data+0x37;      
+ return ASCII_Data;
+}
+
+void HexGroupToString(s8 *OutStrBuffer, u8 *InHexBuffer, u32 HexLength)
+{
+ u32 i, k=0;
+ for(i=0;i<HexLength;i++)
+ {
+  OutStrBuffer[k++]=HexToASCII((InHexBuffer[i]>>4)&0x0F);
+  OutStrBuffer[k++]=HexToASCII(InHexBuffer[i]&0x0F);
+ }
+ OutStrBuffer[k]='\0';
+}
+
+/*
+*********************************************************************************************************
+*                                          EepromSaveLog
+*
+* Description : EepromSaveLog eeprom 写日志
+*
+* Arguments   : LogType 写入日志数据类型，具体是什么类型由调用者定义
+				pLogMsg 为ascII数据类型，参考printf()函数的参数写入，数据写入的长度不能超过sizeof(LogInfo.LogMsg),目前为114字节
+*		
+* Returns     : EepromStatusDef
+*
+* Notes       : 调用者要根据返回值日志写入是否成功，再做出相应处理。本函数调用者不用考虑校验和
+*********************************************************************************************************
+*/
+EepromStatusDef EepromSaveLog(u32 LogType,const char *pLogMsg, ...)
+{
+	u32 len;
+	LogInfoDef LogInfo;
+	EepromStatusDef EepromStatus;
+	len = strlen((char*)pLogMsg);
+	if(len > sizeof(LogInfo.LogMsg))
+	{
+		return EEPROM_LOG_OUT_OF_RANGE;
+	}
+	
+	LogInfo.LogType = LogType;
+	LogInfo.LogTime = HAL_GetTick();
+	strcpy((char*)LogInfo.LogMsg,(char*)pLogMsg);
+	EepromStatus = LogInfoWrite(&LogInfo);
+	
+	if(EepromStatus != EEPROM_LOG_INFO_WRITE_OK)
+	{
+		return EepromStatus;
+	}
+	
+	return EEPROM_LOG_SAVE_OK;
+}
+/*
+*********************************************************************************************************
+*                                          LogInfoRead
+*
+* Description : EepromReadLog eeprom 读一条日志
+*
+* Arguments   : LogReadIndex 读取第几条日志，最大为 LOG_NUMBER_MAX
+*				pReadBuff 	 读取数据
+				OutputLen	 本条日志的数据长度
+*
+* Returns     : EepromStatusDef
+*
+* Notes       : 调用者要根据返回值日志写入是否成功，再做出相应处理。本函数调用者不用考虑校验和，日志应该按顺序逐一读出处理。
+*********************************************************************************************************
+*/
+EepromStatusDef EepromReadLog(u32 LogReadIndex,u8 *pReadBuff,u32 *OutputLen)
+{
+	u32 j,len = 0;
+	EepromStatusDef readStatus;
+	LogInfoDef LogInfoTemp;
+	
+	if(LogReadIndex > LOG_NUMBER_MAX)
+	{
+		return EEPROM_LOG_READ_OUT_OF_RANGE;
+	}
+	if(pReadBuff == NULL)
+	{
+		return EEPROM_LOG_READ_BUFF_ERROR;
+	}
+	
+	for(j = 0; j < sizeof(LogInfoTemp.LogMsg); j++)
+	{
+		pReadBuff[j] = '\0';
+	}
+	readStatus = LogInfoRead(LogReadIndex, &LogInfoTemp);
+	if(readStatus == EEPROM_LOG_INFO_READ_OK)
+	{
+		sprintf((char *)pReadBuff,"%08x,%08x,%08x,",LogInfoTemp.LogType,LogInfoTemp.LogIndex,LogInfoTemp.LogTime);
+		
+		len = strlen((char *)LogInfoTemp.LogMsg);
+		if(len > sizeof(LogInfoTemp.LogMsg))
+		{
+			LogInfoTemp.LogMsg[sizeof(LogInfoTemp.LogMsg) - 1] = '\0';
+			len =  sizeof(LogInfoTemp.LogMsg);
+		}
+		strcpy((char *)pReadBuff + 27,(char *)LogInfoTemp.LogMsg);
+	}
+	else
+	{
+		strcpy((char *)pReadBuff,"read logInfo false!!!");
+		len = strlen((char *)pReadBuff);
+	}
+	
+	*OutputLen = len;
+	
+	return EEPROM_LOG_READ_OK;
+}
+
+/*
+*********************************************************************************************************
+*                                          LogInfoRead
+*
+* Description : LogInfoReadAll eeprom 读取所有日志
+*
+* Arguments   : NULL
+*
+* Returns     : NULL
+*
+* Notes       : 本函数给调用者从调试口打印所有日志，同时也可以同样方法修改按需要的接口输出
+*********************************************************************************************************
+*/
+void LogInfoReadAll(void)
+{
+	u32 i,j;
+	u8 buf[260];
+	u32 tick = HAL_GetTick();
+	EepromStatusDef EepromStatus;
+	
+	for(i = 0; i < LOG_NUMBER_MAX; i++)
+	{	
+		EepromStatus = EepromReadLog(i,buf,&j);	
+		if(EepromStatus == EEPROM_LOG_READ_OK)
+		{
+			Debug_Printf("%s\r\n",buf);
+		}
+		else
+		{
+			Debug_Printf("read log false!!!\r\n");
+		}
+		while(HAL_GetTick() - tick < 30);//等待打印完毕
+		tick = HAL_GetTick();
+	}
+}
+
+/*
+*********************************************************************************************************
+*                                          EepromWriteProgramter
+*
+* Description : EepromWriteProgramter eeprom 写参数
+*
+* Arguments   : EepromWriteAddr 参数写入地址
+*				InputBuff 写入数据，buff最后两个字节默认为checksum，调用者预留空间给驱动层自动写入
+				Lenth 写入数据的长度，包括checksum的长度
+*
+* Returns     : EepromStatusDef
+*
+* Notes       : buff空间必须预留checksum，否则数据会出错
+*********************************************************************************************************
+*/
+EepromStatusDef EepromWriteProgramter(u32 EepromWriteAddr, u8* InputBuff, u32 Lenth)
+{
+	u32 tickStart;
+	volatile u16 crc = 0;
+	if(InputBuff == NULL)
+	{
+		return EEPROM_PROMGRAM_BUFF_ERR;
+	}
+	
+	if(Lenth == 0)
+	{
+		return EEPROM_PROMGRAM_LEN_ERR;
+	}
+	
+	if((EepromWriteAddr + Lenth) > (PROGRAMETER_ADDR_START + PROGRAMETER_DEF_SIZE ))
+	{
+		return EEPROM_WRITE_OUT_OF_RANGE;
+	}
+	//写入校验和
+	crc = crcFast(InputBuff,Lenth - 2);
+	*(u16*)(InputBuff + Lenth - 2) = crc;
+	
+	tickStart = HAL_GetTick();
+	
+	while (EepromHandle->I2cFlag.TxCpltFlag != true)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			return EEPROM_HAL_BUSY;
+		}
+	}
+	
+	tickStart = HAL_GetTick();
+	
+	while(EepromTransmitIT(EepromHandle, (uint16_t)EEPROM_ADDRESS, EepromWriteAddr,EEPROM_ADDR_SIZE, (uint8_t*)InputBuff, Lenth)!= HAL_OK)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			SaveLog(NULL,0);
+			return EEPROM_HAL_ERR;
+		}
+	}
+	
+	tickStart = HAL_GetTick();
+	
+	while (EepromHandle->I2cFlag.TxCpltFlag != true)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			return EEPROM_HAL_BUSY;
+		}
+	}
+	return EEPROM_PROGRAM_WRITE_OK;
+}
+
+
+/*
+*********************************************************************************************************
+*                                          EepromReadProgramter
+*
+* Description : EepromReadProgramter eeprom 读参数
+*
+* Arguments   : EepromWriteAddr 参数读取地址
+*				OutputBuff 读取数据，buff最后两个字节默认为checksum，调用者预留空间给驱动层自动写入
+				Lenth 读取数据的长度，包括checksum的长度
+*
+* Returns     : EepromStatusDef
+*
+* Notes       : buff空间必须预留checksum，否则数据会出错
+*********************************************************************************************************
+*/
+EepromStatusDef EepromReadProgramter(u32 EepromReadAddr, u8* OutputBuff, u32 Lenth)
+{
+	u16 checkSum;
+	u32 tickStart;
+	u32 readLen;
+	
+	if(OutputBuff == NULL)
+	{
+		return EEPROM_PROMGRAM_BUFF_ERR;
+	}
+	
+	if(Lenth == 0)
+	{
+		return EEPROM_PROMGRAM_LEN_ERR;
+	}
+	
+	if((EepromReadAddr + Lenth) > (PROGRAMETER_ADDR_START + PROGRAMETER_DEF_SIZE))
+	{
+		return EEPROM_READ_OUT_OF_RANGE;
+	}
+	
+	tickStart = HAL_GetTick();	
+	while (EepromHandle->I2cFlag.RxCpltFlag != true)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			return EEPROM_HAL_BUSY;
+		}
+	}
+	
+	tickStart = HAL_GetTick();
+	while(EepromRecieveIT(EepromHandle, (uint16_t)EEPROM_ADDRESS, EepromReadAddr,EEPROM_ADDR_SIZE,(uint8_t*)OutputBuff, Lenth,&readLen)!= HAL_OK)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			SaveLog(NULL,0);
+			return EEPROM_HAL_ERR;
+		}
+	}
+	
+	tickStart = HAL_GetTick();	
+	while (EepromHandle->I2cFlag.RxCpltFlag != true)
+	{
+		if(HAL_GetTick() - tickStart > EEPROM_TIME_OUT)
+		{
+			return EEPROM_HAL_BUSY;
+		}
+	}
+	
+	if(readLen != Lenth)
+	{
+		return EEPROM_PROGRAM_READ_ERR;
+	}
+	//判断校验和
+	checkSum = crcFast(OutputBuff,Lenth - 2);
+	
+	if(checkSum != *(u16*)(OutputBuff + Lenth -2))
+	{
+		return EEPROM_BAD_BLOCK_ERR;
+	}
+	
+	return EEPROM_PROGRAM_READ_OK;
+	
+}
+
+void EepromTest(void)
+{
+	EepromStatusDef EepromStatus;
+	LogIndexInfoBadBlockDef LogIndexInfoBadBlock;
+	LogIndexInfoDef LogIndexInfo;
+	
+	EepromInit(&I2c1Handle);
+	
+	LogIndexInfo.CurrentLogIndex = 0x12345678;
+	LogIndexInfo.CurrentLogSaveAddr = 0xabcdef87;
+	
+	//EepromStatus = EepromWriteProgramter(PID_DEF,(u8*)&LogIndexInfo,sizeof(LogIndexInfo));
+	//EepromStatus = EepromReadProgramter(PID_DEF,(u8*)&LogIndexInfo,sizeof(LogIndexInfo));
+	if(LogIndexInfo.CurrentLogIndex != 0x12345678 || LogIndexInfo.CurrentLogSaveAddr != 0xabcdef87)
+	{
+		Debug_Printf("eeprom write programeter successful!!!");
+	}
+	
+	//测试索引坏块区
+	EepromStatus = LogIndexInfoReadBadblocNum(&LogIndexInfoBadBlock);
+	if(LogIndexInfoBadBlock.BadBlockNumber >= 0x64)
+	{
+		LogIndexInfoBadBlock.BadBlockNumber = 0;
+		EepromStatus = LogIndexInfoWriteBadblockNum(&LogIndexInfoBadBlock);
+	}
+	EepromStatus = EepromStatus;
+	
+	//测试日志数据区
+	//LogIndexInfo.CurrentLogIndex = 0x12345678;
+	//LogIndexInfo.CurrentLogSaveAddr = 0xabcdef87;
+	//EepromStatus = LogIndexInfoWrite(&LogIndexInfo);
+	//EepromStatus = LogIndexInfoRead(&LogIndexInfo);
+	//EepromStatus = EepromStatus;
+	
+	//EepromStatus = LogInfoWrite(&LogInfo);
+	//EepromStatus = LogInfoRead(LogIndexInfo.CurrentLogSaveAddr,&LogInfo);
+	//EepromStatus = EepromStatus;
+	
+	//测试对外接口
+	EepromSaveLog(0x03,"log save success!!!!");
+	LogInfoReadAll();
+}

@@ -1,0 +1,570 @@
+/**
+  ******************************************************************************
+  * @file    spitask.c
+  * @author  Firmware-Team
+  * @version V1.0.0
+  * @date    13-06-2016
+  * @brief
+  ******************************************************************************
+**/
+/*
+*********************************************************************************************************
+*                                             INCLUDE FILES
+*********************************************************************************************************
+*/
+#include  <includes.h>
+
+
+/*
+*********************************************************************************************************
+*                                               INT DEFINES
+*********************************************************************************************************
+*/
+#define SPI1_BUFF_SIZE   257
+
+static u8 gSpi1RxBuff[SPI1_BUFF_SIZE];
+static u8 gSpi1TxBuff[SPI1_BUFF_SIZE];
+
+//static u8 gSpi1RxBuff1[SPI1_BUFF_SIZE];
+//static u8 gSpi1TxBuff1[SPI1_BUFF_SIZE];
+
+Queue stSpi1RxQueue, stSpi1TxQueue;
+
+
+
+
+/*! Define SPI1 communication parameters */
+
+#define  SPI1_NUM           SPI1                    //SPI???ú
+#define  SPI1_MODE          SPI_MODE_MASTER        //2ù×÷?￡ê?￡¨master?òslave￡?
+#define  SPI1_DIR           SPI_DIRECTION_2LINES       //éè??·??ò ￡¨è???1¤;°???1¤;￡?
+#define  SPI1_CLKPOL        SPI_POLARITY_HIGH        //ê±?ó??D? ￡¨0￡oμíμ??????D   1￡o??μ??????D￡?
+#define  SPI1_CPHA          SPI_PHASE_1EDGE        //ê±?ó?à??  μúò???ê±?ó??ì?±??òμú?t??ê±?ó??ì?±?
+#define  SPI1_NSS           SPI_NSS_SOFT
+#define  SPI1_PRESCALER     SPI_BAUDRATEPRESCALER_256   //@fixme 8#test°??¨￡?2aê?·￠??￡?SPI_BAUDRATEPRESCALER_16?°ò?é?μ?·??μ￡?3ìDò?éò??y3￡??DD￡????üμ??áμ????T·¨??è??D??
+#define  SPI1_FIRST_BIT     SPI_FIRSTBIT_MSB
+#define  SPI1_DATA_SIZE     SPI_DATASIZE_8BIT
+#define  SPI1_TIMODE        SPI_TIMODE_DISABLE
+
+
+/* SPI1 ???úê±?óéè??*/
+#define SPI1_CLK_ENABLE()                __HAL_RCC_SPI1_CLK_ENABLE()
+#define SPI1_SCK_GPIO_CLK_ENABLE()       __HAL_RCC_GPIOA_CLK_ENABLE()
+#define SPI1_MISO_GPIO_CLK_ENABLE()      __HAL_RCC_GPIOA_CLK_ENABLE()
+#define SPI1_MOSI_GPIO_CLK_ENABLE()      __HAL_RCC_GPIOA_CLK_ENABLE()
+#define SPI1_CS_GPIO_CLK_ENABLE()        __HAL_RCC_GPIOA_CLK_ENABLE()
+#define SPI1_FORCE_RESET()               __HAL_RCC_SPI1_FORCE_RESET()
+#define SPI1_RELEASE_RESET()             __HAL_RCC_SPI1_RELEASE_RESET()
+
+/*! Define SPI1 CLK Gpio pin */
+#define SPI1_CLK_GPIO_PIN          GPIO_PIN_5       //PA5
+#define SPI1_CLK_GPIO_MODE         GPIO_MODE_AF_PP      //
+#define SPI1_CLK_GPIO_PULL         GPIO_PULLUP        //é?à- GPIO_PULLUP   ??à- GPIO_PULLDOWN
+#define SPI1_CLK_GPIO_SPEED        GPIO_SPEED_HIGH      //μí?ù￡??D?ù￡??ì?ù￡????ù GPIO_SPEED_HIGH
+#define SPI1_CLK_GPIO_ALTERNATE    GPIO_AF5_SPI1
+
+/*! Define SPI1 Miso Gpio pin */
+#define SPI1_MISO_GPIO_PIN          GPIO_PIN_6       //PA6
+#define SPI1_MISO_GPIO_MODE         GPIO_MODE_AF_PP
+#define SPI1_MISO_GPIO_PULL         GPIO_PULLUP
+#define SPI1_MISO_GPIO_SPEED        GPIO_SPEED_HIGH
+#define SPI1_MISO_GPIO_ALTERNATE    GPIO_AF5_SPI1
+
+
+/*! Define SPI1 Mosi Gpio pin */
+#define SPI1_MOSI_GPIO_PIN          GPIO_PIN_7       //PA7
+#define SPI1_MOSI_GPIO_MODE         GPIO_MODE_AF_PP
+#define SPI1_MOSI_GPIO_PULL         GPIO_PULLUP
+#define SPI1_MOSI_GPIO_SPEED        GPIO_SPEED_HIGH
+#define SPI1_MOSI_GPIO_ALTERNATE    GPIO_AF5_SPI1
+
+/*! Define SPI1 Cs Gpio pin */
+
+//#define SPI1_CS_GPIO_PIN          GPIO_PIN_1
+//#define SPI1_CS_GPIO_MODE         GPIO_MODE_INPUT
+//#define SPI1_CS_GPIO_PULL         GPIO_PULLUP
+//#define SPI1_CS_GPIO_SPEED        GPIO_SPEED_HIGH
+//#define SPI1_CS_GPIO_ALTERNATE    GPIO_AF5_SPI1
+
+/*! Define SPI1 port*/
+#define SPI1_CLK_GPI0_PORT          GPIOA
+#define SPI1_MISO_GPI0_PORT         GPIOA
+#define SPI1_MOSI_GPI0_PORT         GPIOA
+//#define SPI1_CS_GPI0_PORT           GPIOE
+
+/*! Define SPI1 quene */
+#define  QUEUE_SIZE            (257)
+
+/*! Define SPI1 PORT IRQ */
+#define  IRQ_NUM                  SPI1_IRQn
+#define  IRQ_PRIORITY             2
+#define  IRQ_SUB_PRIORITY         0
+
+
+/* Definition for SPI2 clock resources */
+#define SPI2_HAL_PORT                    SPI2
+#define SPI2_CLK_ENABLE()                __HAL_RCC_SPI2_CLK_ENABLE()
+#define SPI2_SCK_GPIO_CLK_ENABLE()       __HAL_RCC_GPIOB_CLK_ENABLE()
+#define SPI2_MISO_GPIO_CLK_ENABLE()      __HAL_RCC_GPIOB_CLK_ENABLE()
+#define SPI2_MOSI_GPIO_CLK_ENABLE()      __HAL_RCC_GPIOB_CLK_ENABLE()
+#define SPI2_CS_GPIO_CLK_ENABLE()        __HAL_RCC_GPIOB_CLK_ENABLE()
+#define SPI2_FORCE_RESET()               __HAL_RCC_SPI2_FORCE_RESET()
+#define SPI2_RELEASE_RESET()             __HAL_RCC_SPI2_RELEASE_RESET()
+
+
+/* Definition for SPI2 Pins */
+#define SPI2_SCK_GPIO_PORT								GPIOB
+#define SPI2_SCK_PIN                     	GPIO_PIN_13	//PB13:AD_SCLK  串行时钟输入。用于与ADC进行数据传输。
+#define SPI2_SCK_MODE					 						GPIO_MODE_AF_PP
+#define SPI2_SCK_PULL											GPIO_PULLUP
+#define SPI2_SCK_SPEED										GPIO_SPEED_HIGH	//GPIO_SPEED_FAST
+#define SPI2_SCK_AF												GPIO_AF5_SPI2
+
+#define SPI2_MISO_GPIO_PORT								GPIOB
+#define SPI2_MISO_PIN											GPIO_PIN_14	//PB14:AD_DIN  ADC输入移位寄存器的串行数据输入。
+#define SPI2_MISO_MODE										GPIO_MODE_AF_PP
+#define SPI2_MISO_PULL										GPIO_PULLUP
+#define SPI2_MISO_SPEED										GPIO_SPEED_HIGH	//GPIO_SPEED_FAST
+#define SPI2_MISO_AF											GPIO_AF5_SPI2
+
+#define SPI2_MOSI_GPIO_PORT								GPIOB
+#define SPI2_MOSI_PIN											GPIO_PIN_15	//PB15:AD_DOUT/RDY  串行数据输出/数据就绪输出引脚。
+#define SPI2_MOSI_MODE										GPIO_MODE_AF_PP
+#define SPI2_MOSI_PULL										GPIO_PULLUP
+#define SPI2_MOSI_SPEED										GPIO_SPEED_HIGH//GPIO_SPEED_FAST
+#define SPI2_MOSI_AF											GPIO_AF5_SPI2
+
+#define SPI2_CS_GPIO_PORT									GPIOB
+#define SPI2_CS_PIN												GPIO_PIN_12	//PB12:片选输入引脚。 
+#define SPI2_CS_MODE											GPIO_MODE_OUTPUT_PP
+#define SPI2_CS_PULL											GPIO_PULLUP
+#define SPI2_CS_SPEED											GPIO_SPEED_HIGH//GPIO_SPEED_FAST
+#define SPI2_CS_AF												GPIO_AF5_SPI2
+
+
+/* Definition for SPI2's NVIC */
+#define SPI2_HAL_IRQn                    	SPI2_IRQn
+#define SPI2_PREEMPT_PRIORITY							2
+#define SPI2_SUB_PRIORITY									0
+
+
+#define SPI2_BUFF_SIZE										257
+
+/*
+*********************************************************************************************************
+*                                            LOCAL DEFINES
+*********************************************************************************************************
+*/
+
+
+/*
+*********************************************************************************************************
+*                                        LOCAL GLOBAL VARIABLES
+*********************************************************************************************************
+*/
+static u8 gSpi2RxBuff[SPI2_BUFF_SIZE];
+static u8 gSpi2TxBuff[SPI2_BUFF_SIZE];
+//static u8 gSpi2RxTemp[SPI2_BUFF_SIZE];
+Queue stSpi2RxQueue, stSpi2TxQueue;
+
+BspSpiHandle BspSpi1Handle, BspSpi2Handle, BspSpi4Handle, BspSpi5Handle;
+
+/*
+*********************************************************************************************************
+*                                         FUNCTION PROTOTYPES
+*********************************************************************************************************
+*/
+void Spi1ClkEnable( void )
+{
+  SPI1_CLK_ENABLE();
+}
+
+void Spi1SckGpioClkEnable( void )
+{
+  SPI1_SCK_GPIO_CLK_ENABLE();
+}
+
+void Spi1MisoGpioClkEnable( void )
+{
+  SPI1_MISO_GPIO_CLK_ENABLE();
+}
+
+void Spi1MosiGpioClkEnable( void )
+{
+  SPI1_MOSI_GPIO_CLK_ENABLE();
+}
+
+
+void Spi1CsGpioClkEnable( void )
+{
+  SPI1_CS_GPIO_CLK_ENABLE();
+}
+
+
+void Spi1ForceReset( void )
+{
+  SPI1_FORCE_RESET();
+}
+
+
+void Spi1ReleaseReset( void )
+{
+  SPI1_RELEASE_RESET();
+}
+
+
+void ConfigSPI1( void )
+{
+  BspSpi1Handle.SpiHandleInit.Instance               = SPI1_NUM;
+  BspSpi1Handle.SpiHandleInit.Init.Mode              = SPI1_MODE;
+  BspSpi1Handle.SpiHandleInit.Init.Direction         = SPI1_DIR;
+  BspSpi1Handle.SpiHandleInit.Init.DataSize          = SPI_DATASIZE_8BIT;
+  BspSpi1Handle.SpiHandleInit.Init.CLKPolarity       = SPI1_CLKPOL;
+  BspSpi1Handle.SpiHandleInit.Init.CLKPhase          = SPI1_CPHA;
+  BspSpi1Handle.SpiHandleInit.Init.NSS               = SPI1_NSS;
+  BspSpi1Handle.SpiHandleInit.Init.BaudRatePrescaler = SPI1_PRESCALER;
+  BspSpi1Handle.SpiHandleInit.Init.FirstBit          = SPI1_FIRST_BIT;
+  BspSpi1Handle.SpiHandleInit.Init.CRCCalculation    = SPI_CRCCALCULATION_DISABLE;
+  BspSpi1Handle.SpiHandleInit.Init.CRCPolynomial     = 7;
+  BspSpi1Handle.SpiHandleInit.Init.TIMode            = SPI_TIMODE_DISABLE;
+
+  BspSpi1Handle.SckGpioInit.Pin       = SPI1_CLK_GPIO_PIN;
+  BspSpi1Handle.SckGpioInit.Mode      = SPI1_CLK_GPIO_MODE;
+  BspSpi1Handle.SckGpioInit.Pull      = SPI1_CLK_GPIO_PULL;
+  BspSpi1Handle.SckGpioInit.Speed     = SPI1_CLK_GPIO_SPEED;
+  BspSpi1Handle.SckGpioInit.Alternate = SPI1_CLK_GPIO_ALTERNATE;
+
+  BspSpi1Handle.MisoGpioInit.Pin       = SPI1_MISO_GPIO_PIN;
+  BspSpi1Handle.MisoGpioInit.Mode      = SPI1_MISO_GPIO_MODE;
+  BspSpi1Handle.MisoGpioInit.Pull      = SPI1_MISO_GPIO_PULL;
+  BspSpi1Handle.MisoGpioInit.Speed     = SPI1_MISO_GPIO_SPEED;
+  BspSpi1Handle.MisoGpioInit.Alternate = SPI1_MISO_GPIO_ALTERNATE;
+
+  BspSpi1Handle.MosiGpioInit.Pin       = SPI1_MOSI_GPIO_PIN;
+  BspSpi1Handle.MosiGpioInit.Mode      = SPI1_MOSI_GPIO_MODE;
+  BspSpi1Handle.MosiGpioInit.Pull      = SPI1_MOSI_GPIO_PULL;
+  BspSpi1Handle.MosiGpioInit.Speed     = SPI1_MOSI_GPIO_SPEED;
+  BspSpi1Handle.MosiGpioInit.Alternate = SPI1_MOSI_GPIO_ALTERNATE;
+
+  //	if(BspSpi1Handle.SpiHandleInit.Init.NSS != SPI_NSS_SOFT)
+  //	{
+  //		BspSpi1Handle.CsGpioInit.Pin = SPI1_CS_GPIO_PIN;
+  //		BspSpi1Handle.CsGpioInit.Mode = SPI1_CS_GPIO_MODE;
+  //		BspSpi1Handle.CsGpioInit.Pull = SPI1_CS_GPIO_PULL;
+  //		BspSpi1Handle.CsGpioInit.Speed = SPI1_CS_GPIO_SPEED;
+  //		BspSpi1Handle.CsGpioInit.Alternate = SPI1_CS_GPIO_ALTERNATE;
+  //
+  //	}
+
+  BspSpi1Handle.SpiPortInit.SckGpioPort  = SPI1_CLK_GPI0_PORT;
+  BspSpi1Handle.SpiPortInit.MisoGpioPort = SPI1_MISO_GPI0_PORT;
+  BspSpi1Handle.SpiPortInit.MosiGpioPort = SPI1_MOSI_GPI0_PORT;
+
+  //	if(BspSpi1Handle.SpiHandleInit.Init.NSS != SPI_NSS_SOFT)
+  //	{
+  //		BspSpi1Handle.SpiPortInit.CsGpioPort = SPI1_CS_GPI0_PORT;
+  //	}
+
+  BspSpi1Handle.SpiClkSet.ftSckGpioClkEnable  = Spi1SckGpioClkEnable;
+  BspSpi1Handle.SpiClkSet.ftPortClkEnable     = Spi1ClkEnable;
+  BspSpi1Handle.SpiClkSet.ftMisoGpioClkEnable = Spi1MisoGpioClkEnable;
+  BspSpi1Handle.SpiClkSet.ftMosiGpioClkEnable = Spi1MosiGpioClkEnable;
+  //	BspSpi1Handle.SpiClkSet.ftCsGpioClkEnable   = Spi1CsGpioClkEnable;
+  BspSpi1Handle.SpiClkSet.ftPortForceReset    = Spi1ForceReset;
+  BspSpi1Handle.SpiClkSet.ftPortReleaseReset  = Spi1ReleaseReset;
+
+
+  BspSpi1Handle.IrqInit.Irqn            = IRQ_NUM;
+  BspSpi1Handle.IrqInit.PreemptPriority = IRQ_PRIORITY;
+  BspSpi1Handle.IrqInit.SubPriority	    = IRQ_SUB_PRIORITY;
+
+  BspSpi1Handle.SpiFlag.RxCpltFlag				= true;
+  BspSpi1Handle.SpiFlag.TxCpltFlag				= true;
+  BspSpi1Handle.SpiFlag.TxQueueOverFlag 	= false;
+  BspSpi1Handle.SpiFlag.RxQueueOverFlag		= false;
+  BspSpi1Handle.SpiFlag.RxHalErrorFlag		= false;
+  BspSpi1Handle.SpiFlag.TxHalErrorFlag		= false;
+
+  BspSpi1Handle.SpiQuque.RxBuff     = gSpi1RxBuff;
+  BspSpi1Handle.SpiQuque.RxQueue    = &stSpi1RxQueue;
+  BspSpi1Handle.SpiQuque.RxBuffSize = SPI1_BUFF_SIZE;
+  BspSpi1Handle.SpiQuque.TxBuff     = gSpi1TxBuff;
+  BspSpi1Handle.SpiQuque.TxQueue    = &stSpi1TxQueue;
+  BspSpi1Handle.SpiQuque.TxBuffSize = SPI1_BUFF_SIZE;
+
+  BspSpiHandleInit( &BspSpi1Handle );
+}
+
+
+
+/**************************************************************************************
+** 函数名称: Spi2ClkEnable
+** 参数    : 无
+** 函数功能: SPI2 CLK时钟使能
+** 返回值  : 无
+**************************************************************************************/
+static void Spi2ClkEnable( void )
+{
+  SPI2_CLK_ENABLE();
+}
+
+static void Spi2MisoGpioClkEnable( void )
+{
+  SPI2_MISO_GPIO_CLK_ENABLE();
+}
+
+static void Spi2MosiGpioClkEnable( void )
+{
+  SPI2_MOSI_GPIO_CLK_ENABLE();
+}
+
+static void Spi2SckGpioClkEnable( void )
+{
+  SPI2_SCK_GPIO_CLK_ENABLE();
+}
+
+static void Spi2CsGpioClkEnable( void )
+{
+  SPI2_CS_GPIO_CLK_ENABLE();
+}
+static void Spi2ForceReset( void )
+{
+  SPI2_FORCE_RESET();
+}
+
+static void Spi2ReleaseReset( void )
+{
+  SPI2_RELEASE_RESET();
+}
+
+/**************************************************************************************
+** 函数名称: Spi2ClkEnable
+** 参数    : 无
+** 函数功能: SPI2配置  AD7124-8有一个3线或4线SPI接口，该接口以SPI模式3工作
+** 返回值  : 无
+**************************************************************************************/
+void Spi2Config( void )
+{
+  GPIO_InitTypeDef GPIO_InitStruct;
+  /*##-1- Configure the SPI peripheral #######################################*/
+  /* Set the SPI parameters */
+  BspSpi2Handle.SpiHandleInit.Instance									= SPI2_HAL_PORT;
+  BspSpi2Handle.SpiHandleInit.Init.BaudRatePrescaler		= SPI_BAUDRATEPRESCALER_2;
+  BspSpi2Handle.SpiHandleInit.Init.Direction 						= SPI_DIRECTION_2LINES;
+  //BspSpi2Handle.SpiHandleInit.Init.CLKPhase						= SPI_PHASE_1EDGE;
+  BspSpi2Handle.SpiHandleInit.Init.CLKPhase 						= SPI_PHASE_2EDGE;
+  BspSpi2Handle.SpiHandleInit.Init.CLKPolarity 					= SPI_POLARITY_HIGH;
+  BspSpi2Handle.SpiHandleInit.Init.CRCCalculation				= SPI_CRCCALCULATION_DISABLE;
+  BspSpi2Handle.SpiHandleInit.Init.CRCPolynomial				= 7;
+  BspSpi2Handle.SpiHandleInit.Init.DataSize 						= SPI_DATASIZE_8BIT;
+  BspSpi2Handle.SpiHandleInit.Init.FirstBit 						= SPI_FIRSTBIT_MSB;
+  BspSpi2Handle.SpiHandleInit.Init.NSS									= SPI_NSS_SOFT;
+  //BspSpi2Handle.SpiHandleInit.Init.NSS 								= SPI_NSS_HARD_OUTPUT;
+  BspSpi2Handle.SpiHandleInit.Init.TIMode 							= SPI_TIMODE_DISABLE;
+  BspSpi2Handle.SpiHandleInit.Init.Mode 								= SPI_MODE_MASTER;
+
+  BspSpi2Handle.SckGpioInit.Pin 												= SPI2_SCK_PIN;	//PB13:AD_SCLK
+  BspSpi2Handle.SckGpioInit.Mode 												= SPI2_SCK_MODE;
+  BspSpi2Handle.SckGpioInit.Pull 												= SPI2_SCK_PULL;
+  BspSpi2Handle.SckGpioInit.Speed 											= GPIO_SPEED_FREQ_HIGH;
+  BspSpi2Handle.SckGpioInit.Alternate 									= SPI2_SCK_AF;
+
+  BspSpi2Handle.MisoGpioInit.Pin 												= SPI2_MISO_PIN;	//PB14:AD_DIN
+  BspSpi2Handle.MisoGpioInit.Mode 											= SPI2_MISO_MODE;
+  BspSpi2Handle.MisoGpioInit.Pull 											= SPI2_MISO_PULL;
+  BspSpi2Handle.MisoGpioInit.Speed 											= GPIO_SPEED_FREQ_HIGH;
+  BspSpi2Handle.MisoGpioInit.Alternate 									= SPI2_MISO_AF;
+
+  BspSpi2Handle.MosiGpioInit.Pin 												= SPI2_MOSI_PIN;	//PB15:AD_DOUT/RDY
+  BspSpi2Handle.MosiGpioInit.Mode 											= SPI2_MOSI_MODE;
+  BspSpi2Handle.MosiGpioInit.Pull 											= SPI2_MOSI_PULL;
+  BspSpi2Handle.MosiGpioInit.Speed 											= GPIO_SPEED_FREQ_HIGH;
+  BspSpi2Handle.MosiGpioInit.Alternate 									= SPI2_MOSI_AF;
+
+
+  /**************************设置CS引脚**********************************************/
+#if 0
+  if( BspSpi2Handle.SpiHandleInit.Init.NSS != SPI_NSS_SOFT )
+  {
+    BspSpi2Handle.CsGpioInit.Pin						= SPI2_CS_PIN;
+    BspSpi2Handle.CsGpioInit.Mode						= SPI2_CS_MODE;
+    BspSpi2Handle.CsGpioInit.Pull						= SPI2_CS_PULL;
+    BspSpi2Handle.CsGpioInit.Speed					= GPIO_SPEED_FREQ_HIGH;
+    BspSpi2Handle.CsGpioInit.Alternate			= SPI2_CS_AF;
+  }
+#else
+  __GPIOB_CLK_ENABLE();
+  GPIO_InitStruct.Pin   = SPI2_CS_PIN;	//PB12:片选输入引脚。
+  GPIO_InitStruct.Mode  = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull  = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+  HAL_GPIO_Init( SPI2_CS_GPIO_PORT, &GPIO_InitStruct );
+
+  HAL_GPIO_WritePin( SPI2_CS_GPIO_PORT, SPI2_CS_PIN, GPIO_PIN_SET ); //CS=1
+#endif
+
+  BspSpi2Handle.SpiPortInit.MosiGpioPort 							= SPI2_MOSI_GPIO_PORT;
+  BspSpi2Handle.SpiPortInit.MisoGpioPort 							= SPI2_MISO_GPIO_PORT;
+  BspSpi2Handle.SpiPortInit.SckGpioPort 							= SPI2_SCK_GPIO_PORT;
+
+  if( BspSpi2Handle.SpiHandleInit.Init.NSS != SPI_NSS_SOFT )
+  {
+    BspSpi2Handle.SpiPortInit.CsGpioPort 						= SPI2_CS_GPIO_PORT;
+  }
+
+  BspSpi2Handle.SpiClkSet.ftPortClkEnable						= Spi2ClkEnable;
+  BspSpi2Handle.SpiClkSet.ftMisoGpioClkEnable				= Spi2MisoGpioClkEnable;
+  BspSpi2Handle.SpiClkSet.ftMosiGpioClkEnable				= Spi2MosiGpioClkEnable;
+  BspSpi2Handle.SpiClkSet.ftSckGpioClkEnable				= Spi2SckGpioClkEnable;
+  BspSpi2Handle.SpiClkSet.ftCsGpioClkEnable					= Spi2CsGpioClkEnable;
+  BspSpi2Handle.SpiClkSet.ftPortForceReset					= Spi2ForceReset;
+  BspSpi2Handle.SpiClkSet.ftPortReleaseReset				= Spi2ReleaseReset;
+
+  BspSpi2Handle.IrqInit.Irqn 												= SPI2_HAL_IRQn;
+  BspSpi2Handle.IrqInit.PreemptPriority							= SPI2_PREEMPT_PRIORITY;
+  BspSpi2Handle.IrqInit.SubPriority 								= SPI2_SUB_PRIORITY;
+
+  BspSpi2Handle.SpiFlag.RxCpltFlag 									= true;
+  BspSpi2Handle.SpiFlag.TxCpltFlag 									= true;
+  BspSpi2Handle.SpiFlag.TxQueueOverFlag							= false;
+  BspSpi2Handle.SpiFlag.RxQueueOverFlag							= false;
+  BspSpi2Handle.SpiFlag.RxHalErrorFlag 							= false;
+  BspSpi2Handle.SpiFlag.TxHalErrorFlag 							= false;
+
+  BspSpi2Handle.SpiQuque.RxQueue 										= &stSpi2RxQueue;
+  BspSpi2Handle.SpiQuque.RxBuff 										= gSpi2RxBuff;
+  BspSpi2Handle.SpiQuque.RxBuffSize 								= SPI2_BUFF_SIZE;
+  BspSpi2Handle.SpiQuque.TxQueue 										= &stSpi2TxQueue;
+  BspSpi2Handle.SpiQuque.TxBuff 										= gSpi2TxBuff;
+  BspSpi2Handle.SpiQuque.TxBuffSize 								= SPI2_BUFF_SIZE;
+
+  if( BspSpiHandleInit( &BspSpi2Handle ) != HAL_OK )
+  {
+    /* Initialization Error */
+    SaveLog( NULL, 0 );
+  }
+}
+
+void SPI2_CS_LOW( void )
+{
+  HAL_GPIO_WritePin( SPI2_CS_GPIO_PORT, SPI2_CS_PIN, GPIO_PIN_RESET );
+}
+
+void SPI2_CS_HIGH( void )
+{
+  HAL_GPIO_WritePin( SPI2_CS_GPIO_PORT, SPI2_CS_PIN, GPIO_PIN_SET );
+}
+
+void  Spi2Test( void *p_arg )
+{
+  u32 i, spi2RxRealLen;
+  ( void )p_arg;
+  for( i = 0; i < SPI2_BUFF_SIZE; i++ )
+  {
+    gSpi2TxBuff[i] = i;
+    gSpi2RxBuff[i] = 0;
+  }
+
+  HAL_GPIO_WritePin( SPI2_CS_GPIO_PORT, SPI2_CS_PIN, GPIO_PIN_RESET );
+
+  if( BspSpiTransmitIT( &BspSpi2Handle, ( uint8_t* )gSpi2TxBuff, SPI2_BUFF_SIZE - 1 ) != HAL_OK )
+  {
+    /* Transfer error in transmission process */
+    SaveLog( NULL, 0 );
+  }
+  else
+  {
+  }
+
+
+  while( BspSpi2Handle.SpiFlag.TxCpltFlag == false )
+  {
+  }
+  HAL_GPIO_WritePin( SPI2_CS_GPIO_PORT, SPI2_CS_PIN, GPIO_PIN_SET );
+  HAL_GPIO_WritePin( SPI2_CS_GPIO_PORT, SPI2_CS_PIN, GPIO_PIN_RESET );
+  if( BspSpiRecieveIT( &BspSpi2Handle, ( uint8_t* )gSpi2RxBuff, SPI2_BUFF_SIZE - 1, &spi2RxRealLen ) != HAL_OK )
+  {
+    /* Transfer error in transmission process */
+    SaveLog( NULL, 0 );
+  }
+
+  while( BspSpi2Handle.SpiFlag.RxCpltFlag == false )
+  {
+  }
+  HAL_GPIO_WritePin( SPI2_CS_GPIO_PORT, SPI2_CS_PIN, GPIO_PIN_SET );
+  HAL_GPIO_WritePin( SPI2_CS_GPIO_PORT, SPI2_CS_PIN, GPIO_PIN_RESET );
+  if( BspSpiTransmitReceiveIT( &BspSpi2Handle, ( uint8_t* )gSpi2TxBuff, ( uint8_t* )gSpi2RxBuff, SPI2_BUFF_SIZE - 1 ) != HAL_OK )
+  {
+    SaveLog( NULL, 0 );
+  }
+
+  while( BspSpi2Handle.SpiFlag.RxCpltFlag == false )
+  {
+  }
+  HAL_GPIO_WritePin( SPI2_CS_GPIO_PORT, SPI2_CS_PIN, GPIO_PIN_SET );
+  /*##-4- Compare the sent and received buffers ##############################*/
+  if( Buffercmp( ( uint8_t* )gSpi2TxBuff, ( uint8_t* )gSpi2RxBuff, SPI2_BUFF_SIZE ) )
+  {
+    /* Transfer error in transmission process */
+    Debug_Printf( "spi2 test false!!!\r\n" );
+  }
+  else
+  {
+  }
+}
+
+/*! -------------------------for test------------------------ */
+void  TestForSpi1( void *p_arg )
+{
+  u32 i, spi1RxRealLen;
+  ( void )p_arg;
+  for( i = 0; i < SPI1_BUFF_SIZE; i++ )
+  {
+    gSpi1TxBuff[i] = i;
+    gSpi1RxBuff[i] = 0;
+  }
+
+#if 1
+  if( BspSpiTransmitIT( &BspSpi1Handle, ( uint8_t* )gSpi1TxBuff, SPI1_BUFF_SIZE - 1 ) != HAL_OK )
+  {
+    /* Transfer error in transmission process */
+    SaveLog( NULL, 0 );
+  }
+  else
+  {
+  }
+
+  while( BspSpi1Handle.SpiFlag.TxCpltFlag == false )
+  {
+  }
+
+  if( BspSpiRecieveIT( &BspSpi1Handle, ( uint8_t* )gSpi1RxBuff, SPI1_BUFF_SIZE - 2, &spi1RxRealLen ) != HAL_OK )
+  {
+    /* Transfer error in transmission process */
+    SaveLog( NULL, 0 );
+  }
+
+  while( BspSpi1Handle.SpiFlag.RxCpltFlag == false )
+  {
+  }
+#endif
+
+  if( BspSpiTransmitReceiveIT( &BspSpi1Handle, ( uint8_t* )gSpi1TxBuff, ( uint8_t* )gSpi1RxBuff, SPI1_BUFF_SIZE - 1 ) != HAL_OK )
+  {
+    SaveLog( NULL, 0 );
+  }
+
+  while( BspSpi1Handle.SpiFlag.RxCpltFlag == false )
+  {
+  }
+
+  /*##-1- Compare the sent and received buffers ##############################*/
+  if( Buffercmp( ( uint8_t* )gSpi1TxBuff, ( uint8_t* )gSpi1RxBuff, SPI1_BUFF_SIZE ) )
+  {
+    /* Transfer error in transmission process */
+    Debug_Printf( "spi1 test false!!!\r\n" );
+  }
+  else
+  {
+  }
+}

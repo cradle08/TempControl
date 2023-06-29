@@ -1,0 +1,387 @@
+/**
+  ******************************************************************************
+  * @file    uartTask.c
+  * @author  Firmware-Team
+  * @version V1.0.0
+  * @date    27-06-2016
+  * @brief   
+  ******************************************************************************
+**/
+/*
+*********************************************************************************************************
+*                                             INCLUDE FILES
+*********************************************************************************************************
+*/
+#include  "includes.h"
+
+
+/*
+*********************************************************************************************************
+*                                               INT DEFINES
+*********************************************************************************************************
+*/
+
+#define USART1_BUFF_SIZE	513
+#define USART3_BUFF_SIZE	513
+
+/* USAR1 IT MODE CONFIG *****************************************************************************************/
+/* User can use this section to tailor USARTx/UARTx instance used and associated 
+   resources */
+/* Definition for USARTx clock resources */
+#define USART1_HAL_PORT                  USART1 
+#define USART1_BAUD_RATE				 115200
+#define USART1_WORDLENGTH 				 UART_WORDLENGTH_8B
+#define USART1_STOPBITS                  UART_STOPBITS_1
+#define USART1_PARITY 					 UART_PARITY_NONE
+#define USART1_HWCONTROL 				 UART_HWCONTROL_NONE
+#define USART1_MODE 					 UART_MODE_TX_RX
+#define USART1_OVERSAMPLING 			 UART_OVERSAMPLING_16
+
+#define USART1_CLK_ENABLE()              __HAL_RCC_USART1_CLK_ENABLE()
+#define USART1_RX_GPIO_CLK_ENABLE()      __HAL_RCC_GPIOA_CLK_ENABLE()
+#define USART1_TX_GPIO_CLK_ENABLE()      __HAL_RCC_GPIOA_CLK_ENABLE() 
+	
+#define USART1_FORCE_RESET()             __HAL_RCC_USART1_FORCE_RESET()
+#define USART1_RELEASE_RESET()           __HAL_RCC_USART1_RELEASE_RESET()
+	
+	/* Definition for USARTx Pins */
+#define USART1_TX_GPIO_PORT              GPIOA 
+#define USART1_TX_PIN                    GPIO_PIN_9 
+#define USART1_TX_MODE                   GPIO_MODE_AF_PP
+#define USART1_TX_PULL                   GPIO_NOPULL
+#define USART1_TX_SPEED                  GPIO_SPEED_FREQ_HIGH
+#define USART1_TX_AF                     GPIO_AF7_USART1
+
+#define USART1_RX_GPIO_PORT              GPIOA 
+#define USART1_RX_PIN                    GPIO_PIN_10
+#define USART1_RX_MODE                   GPIO_MODE_AF_PP
+#define USART1_RX_PULL                   GPIO_NOPULL
+#define USART1_RX_SPEED                  GPIO_SPEED_FREQ_HIGH
+#define USART1_RX_AF                     GPIO_AF7_USART1
+	
+	/* Definition for USARTx's NVIC */
+#define USART1_HAL_IRQn                      USART1_IRQn
+#define USART1_PREEMPT_PRIORITY							1
+#define USART1_SUB_PRIORITY								0
+
+
+/* USART3 IT MODE CONFIG *****************************************************************************************/
+/* Definition for USARTx clock resources */
+#define USART3_HAL_PORT                   USART3
+#define USART3_BAUD_RATE				  115200
+#define USART3_WORDLENGTH 				  UART_WORDLENGTH_8B
+#define USART3_STOPBITS                   UART_STOPBITS_1
+#define USART3_PARITY 					  UART_PARITY_NONE
+#define USART3_HWCONTROL 				  UART_HWCONTROL_NONE
+#define USART3_MODE 					  UART_MODE_TX_RX
+#define USART3_OVERSAMPLING 			  UART_OVERSAMPLING_16
+
+#define USART3_CLK_ENABLE()              __HAL_RCC_USART3_CLK_ENABLE()
+#define USART3_RX_GPIO_CLK_ENABLE()      __HAL_RCC_GPIOC_CLK_ENABLE()
+#define USART3_TX_GPIO_CLK_ENABLE()      __HAL_RCC_GPIOC_CLK_ENABLE() 
+
+#define USART3_FORCE_RESET()             __HAL_RCC_USART3_FORCE_RESET()
+#define USART3_RELEASE_RESET()           __HAL_RCC_USART3_RELEASE_RESET() 
+
+/* Definition for USARTx Pins */
+#define USART3_TX_PIN                    GPIO_PIN_10
+#define USART3_TX_GPIO_PORT              GPIOC
+#define USART3_TX_MODE                   GPIO_MODE_AF_PP
+#define USART3_TX_PULL                   GPIO_NOPULL
+#define USART3_TX_SPEED                  GPIO_SPEED_FREQ_HIGH
+#define USART3_TX_AF                     GPIO_AF7_USART3
+#define USART3_RX_PIN                    GPIO_PIN_11
+#define USART3_RX_GPIO_PORT              GPIOC
+#define USART3_RX_MODE                   GPIO_MODE_AF_PP
+#define USART3_RX_PULL                   GPIO_NOPULL
+#define USART3_RX_SPEED                  GPIO_SPEED_FREQ_HIGH
+#define USART3_RX_AF                     GPIO_AF7_USART3
+
+
+#define USART3_HAL_IRQn                  USART3_IRQn
+#define USART3_PREEMPT_PRIORITY							15  //lwx modify 20170508
+#define USART3_SUB_PRIORITY								0
+
+
+
+/*
+*********************************************************************************************************
+*                                            LOCAL DEFINES
+*********************************************************************************************************
+*/
+
+
+/*
+*********************************************************************************************************
+*                                        LOCAL GLOBAL VARIABLES
+*********************************************************************************************************
+*/
+BspUartHandle BspUart1Handle,BspUart3Handle,BspUart6Handle,BspUart7Handle;
+
+
+u8 uart1Rxdata;
+static u8 gUart1RxBuff[USART1_BUFF_SIZE];
+static u8 gUart1TxBuff[USART1_BUFF_SIZE];
+//static u8 gUart1RxTemp[USART1_BUFF_SIZE];
+Queue stUart1RxQueue,stUart1TxQueue;
+
+u8 uart3RxData;
+static u8 gUart3RxBuff[USART3_BUFF_SIZE];
+static u8 gUart3TxBuff[USART3_BUFF_SIZE];
+static u8 gUart3RxTemp[USART3_BUFF_SIZE];
+Queue stUart3RxQueue,stUart3TxQueue;
+
+
+/*
+*********************************************************************************************************
+*                                         FUNCTION PROTOTYPES
+*********************************************************************************************************
+*/
+
+static void Uart1ClkEnable(void)
+{
+	USART1_CLK_ENABLE();
+}
+
+static void Uart1RxGpioClkEnable(void)
+{
+	USART1_RX_GPIO_CLK_ENABLE();
+}
+
+static void Uart1TxGpioClkEnable(void)
+{
+	USART1_TX_GPIO_CLK_ENABLE();
+}
+
+static void Uart1ForceReset(void)
+{
+	USART1_FORCE_RESET();
+}
+
+static void Uart1ReleaseReset(void)
+{
+	USART1_RELEASE_RESET();
+}
+
+
+void Uart1Config(void)
+{
+	BspUart1Handle.UartHandleInit.Instance 			= USART1_HAL_PORT;
+	BspUart1Handle.UartHandleInit.Init.BaudRate	  	= USART1_BAUD_RATE;
+	BspUart1Handle.UartHandleInit.Init.WordLength   = USART1_WORDLENGTH;
+	BspUart1Handle.UartHandleInit.Init.StopBits	  	= USART1_STOPBITS;
+	BspUart1Handle.UartHandleInit.Init.Parity 	  	= USART1_PARITY;
+	BspUart1Handle.UartHandleInit.Init.HwFlowCtl	= USART1_HWCONTROL;
+	BspUart1Handle.UartHandleInit.Init.Mode		  	= USART1_MODE;
+	BspUart1Handle.UartHandleInit.Init.OverSampling = USART1_OVERSAMPLING;
+
+	BspUart1Handle.TxGpioInit.Pin 					= USART1_TX_PIN;
+	BspUart1Handle.TxGpioInit.Mode 					= USART1_TX_MODE;
+	BspUart1Handle.TxGpioInit.Pull 					= USART1_TX_PULL;
+	BspUart1Handle.TxGpioInit.Speed 				= USART1_TX_SPEED;
+	BspUart1Handle.TxGpioInit.Alternate 			= USART1_TX_AF;
+
+	BspUart1Handle.RxGpioInit.Pin 					= USART1_RX_PIN;
+	BspUart1Handle.RxGpioInit.Mode 					= USART1_RX_MODE;
+	BspUart1Handle.RxGpioInit.Pull 					= USART1_RX_PULL;
+	BspUart1Handle.RxGpioInit.Speed 				= USART1_RX_SPEED;
+	BspUart1Handle.RxGpioInit.Alternate 			= USART1_RX_AF;
+
+	BspUart1Handle.UartPortInit.TxGpioPort 			= USART1_TX_GPIO_PORT;
+	BspUart1Handle.UartPortInit.RxGpioPort 			= USART1_RX_GPIO_PORT;
+
+	BspUart1Handle.UartClkSet.ftPortClkEnable		= Uart1ClkEnable;
+	BspUart1Handle.UartClkSet.ftRxGpioClkEnable		= Uart1RxGpioClkEnable;
+	BspUart1Handle.UartClkSet.ftTxGpioClkEnable 	= Uart1TxGpioClkEnable;
+	BspUart1Handle.UartClkSet.ftPortForceReset		= Uart1ForceReset;
+	BspUart1Handle.UartClkSet.ftPortReleaseReset	= Uart1ReleaseReset;
+	
+	BspUart1Handle.IrqInit.Irqn 					= USART1_HAL_IRQn;
+	BspUart1Handle.IrqInit.PreemptPriority 			= USART1_PREEMPT_PRIORITY;
+	BspUart1Handle.IrqInit.SubPriority 				= USART1_SUB_PRIORITY;
+
+	BspUart1Handle.UartFlag.RxCpltFlag				= true;
+	BspUart1Handle.UartFlag.TxCpltFlag				= true;
+	BspUart1Handle.UartFlag.TxQueueOverFlag			= false;
+	BspUart1Handle.UartFlag.RxQueueOverFlag			= false;
+	BspUart1Handle.UartFlag.RxHalErrorFlag			= false;
+
+	BspUart1Handle.UartQuque.RxQueue				= &stUart1RxQueue;
+	BspUart1Handle.UartQuque.RxBuff					= gUart1RxBuff;
+	BspUart1Handle.UartQuque.RxBuffSize				= USART1_BUFF_SIZE;
+	BspUart1Handle.UartQuque.TxQueue				= &stUart1TxQueue;
+	BspUart1Handle.UartQuque.TxBuff					= gUart1TxBuff;
+	BspUart1Handle.UartQuque.TxBuffSize				= USART1_BUFF_SIZE;
+	
+	BspUartHandleInit(&BspUart1Handle);
+}
+
+static void Uart3ClkEnable(void)
+{
+	USART3_CLK_ENABLE();
+}
+
+static void Uart3RxGpioClkEnable(void)
+{
+	USART3_RX_GPIO_CLK_ENABLE();
+}
+
+static void Uart3TxGpioClkEnable(void)
+{
+	USART3_TX_GPIO_CLK_ENABLE();
+}
+
+static void Uart3ForceReset(void)
+{
+	USART3_FORCE_RESET();
+}
+
+static void Uart3ReleaseReset(void)
+{
+	USART3_RELEASE_RESET();
+}
+
+void Uart3Config(void)
+{
+	BspUart3Handle.UartHandleInit.Instance 			= USART3_HAL_PORT;
+	BspUart3Handle.UartHandleInit.Init.BaudRate	  	= USART3_BAUD_RATE;
+	BspUart3Handle.UartHandleInit.Init.WordLength   = USART3_WORDLENGTH;
+	BspUart3Handle.UartHandleInit.Init.StopBits	  	= USART3_STOPBITS;
+	BspUart3Handle.UartHandleInit.Init.Parity 	  	= USART3_PARITY;
+	BspUart3Handle.UartHandleInit.Init.HwFlowCtl	= USART3_HWCONTROL;
+	BspUart3Handle.UartHandleInit.Init.Mode		  	= USART3_MODE;
+	BspUart3Handle.UartHandleInit.Init.OverSampling = USART3_OVERSAMPLING;
+
+	BspUart3Handle.TxGpioInit.Pin 					= USART3_TX_PIN;
+	BspUart3Handle.TxGpioInit.Mode 					= USART3_TX_MODE;
+	BspUart3Handle.TxGpioInit.Pull 					= USART3_TX_PULL;
+	BspUart3Handle.TxGpioInit.Speed 				= USART3_TX_SPEED;
+	BspUart3Handle.TxGpioInit.Alternate 			= USART3_TX_AF;
+
+	BspUart3Handle.RxGpioInit.Pin 					= USART3_RX_PIN;
+	BspUart3Handle.RxGpioInit.Mode 					= USART3_RX_MODE;
+	BspUart3Handle.RxGpioInit.Pull 					= USART3_RX_PULL;
+	BspUart3Handle.RxGpioInit.Speed 				= USART3_RX_SPEED;
+	BspUart3Handle.RxGpioInit.Alternate 			= USART3_RX_AF;
+
+	BspUart3Handle.UartPortInit.TxGpioPort 			= USART3_TX_GPIO_PORT;
+	BspUart3Handle.UartPortInit.RxGpioPort 			= USART3_RX_GPIO_PORT;
+
+	BspUart3Handle.UartClkSet.ftPortClkEnable		= Uart3ClkEnable;
+	BspUart3Handle.UartClkSet.ftRxGpioClkEnable		= Uart3RxGpioClkEnable;
+	BspUart3Handle.UartClkSet.ftTxGpioClkEnable 	= Uart3TxGpioClkEnable;
+	BspUart3Handle.UartClkSet.ftPortForceReset		= Uart3ForceReset;
+	BspUart3Handle.UartClkSet.ftPortReleaseReset	= Uart3ReleaseReset;
+	
+	BspUart3Handle.IrqInit.Irqn 					= USART3_IRQn;
+	BspUart3Handle.IrqInit.PreemptPriority 			= USART3_PREEMPT_PRIORITY;
+	BspUart3Handle.IrqInit.SubPriority 				= USART3_SUB_PRIORITY;
+
+	BspUart3Handle.UartFlag.RxCpltFlag				= true;
+	BspUart3Handle.UartFlag.TxCpltFlag				= true;
+	BspUart3Handle.UartFlag.TxQueueOverFlag			= false;
+	BspUart3Handle.UartFlag.RxQueueOverFlag			= false;
+
+	BspUart3Handle.UartQuque.RxQueue				= &stUart3RxQueue;
+	BspUart3Handle.UartQuque.RxBuff					= gUart3RxBuff;
+	BspUart3Handle.UartQuque.RxBuffSize				= USART3_BUFF_SIZE;
+	BspUart3Handle.UartQuque.TxQueue				= &stUart3TxQueue;
+	BspUart3Handle.UartQuque.TxBuff					= gUart3TxBuff;
+	BspUart3Handle.UartQuque.TxBuffSize				= USART3_BUFF_SIZE;
+	
+	BspUartHandleInit(&BspUart3Handle);
+}
+
+
+/*
+*********************************************************************************************************
+*                                          STARTUP TASK
+*
+* Description : This is an example of a startup task.  As mentioned in the book's text, you MUST
+*               initialize the ticker only once multitasking has started.
+*
+* Arguments   : p_arg   is the argument passed to 'AppTaskStart()' by 'OSTaskCreate()'.
+*
+* Returns     : none
+*
+* Notes       : 1) The first line of code is used to prevent a compiler warning because 'p_arg' is not
+*                  used.  The compiler should not generate any code for this statement.
+*********************************************************************************************************
+*/
+
+u32 uart1RxCount = 0;
+u32 uart1RxOverCount = 0;
+void  Usart1Test(void *p_arg)
+{
+	u32 uart1RxRealLen = 0,i;
+	BspStatusTypeDef status;
+	u8 gUart1TxTemp[USART1_BUFF_SIZE];
+	u8 gUart1RxTemp[USART1_BUFF_SIZE];
+	(void)p_arg;
+	
+	/* Task body, always written as an infinite loop */
+
+	for(i = 0; i < USART1_BUFF_SIZE - 1; i++)
+	{
+		gUart1TxTemp[i] = i;
+		gUart1RxTemp[i] = 0;
+	}
+	
+	while(BspUartTransmitIT(&BspUart1Handle,gUart1TxTemp,USART1_BUFF_SIZE - 1) != BSP_OK);
+	
+	while(BspUart1Handle.UartFlag.TxCpltFlag == false);
+	
+	status = BspUartReceiveIT(&BspUart1Handle,gUart1RxTemp,USART1_BUFF_SIZE - 1,&uart1RxRealLen);
+	
+	
+	if(status == BSP_RX_QUEUE_OVER)
+	{
+		//Uart1Config();
+		uart1RxOverCount++;
+		//uart1RxRealLen = USART1_BUFF_SIZE - 1;
+	}
+//	uart1RxRealLen = USART1_BUFF_SIZE - 1;
+	if(Buffercmp(gUart1RxTemp,gUart1TxTemp,USART1_BUFF_SIZE - 1) == 0)
+	{
+		//Debug_Printf("uart1 test true!!!\r\n");
+	}
+	else
+	{
+		Debug_Printf("uart1 test false!!!\r\n");
+	}
+}
+
+
+
+u32 uart3RxCount = 0;
+u32 uart3RxOverCount = 0;
+void  Usart3Test(void *p_arg)
+{
+	u32 uart3RxRealLen = 0,i;
+	BspStatusTypeDef status;
+
+	(void)p_arg;
+	
+	/* Task body, always written as an infinite loop */
+
+	for(i = 0; i < USART1_BUFF_SIZE - 1; i++)
+	{
+		gUart3RxTemp[i] = i;
+	}
+
+	status = BspUartReceiveIT(&BspUart3Handle,gUart3RxTemp,USART3_BUFF_SIZE - 1,&uart3RxRealLen);
+	
+	if(status == BSP_RX_QUEUE_OVER)
+	{
+		//Uart3Config();
+		uart3RxOverCount++;
+		//uart3RxRealLen = USART3_BUFF_SIZE - 1;
+	}
+//	uart3RxRealLen = USART3_BUFF_SIZE - 1;
+	if(uart3RxRealLen > 0)
+	{
+		while(BspUartTransmitIT(&BspUart3Handle,gUart3RxTemp,uart3RxRealLen) != BSP_OK);
+		uart3RxCount += uart3RxRealLen;
+	}
+}
+

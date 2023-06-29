@@ -1,0 +1,70 @@
+/**
+  ******************************************************************************
+  * @file    includes.h
+  * @author  Firmware-Team
+  * @version V1.0.0
+  * @date    13-06-2016
+  * @brief
+  ******************************************************************************
+**/
+
+#ifndef  __INCLUDES__
+#define  __INCLUDES__
+
+/*
+*********************************************************************************************************
+*                                              INCLUDE FILES
+*********************************************************************************************************
+*/
+#include  <string.h>
+#include  <stdarg.h>
+#include  <stdio.h>
+#include  <math.h>
+#include  <stm32f3xx_hal.h>
+
+#include  <lib_math.h>
+#include  <lib_mem.h>
+
+#include  <app_cfg.h>
+#include  <bsp_common.h>
+
+#include "stm32f3xx_hal_msp.h"
+#include "stm32f3xx_it.h"
+#include "loopBuff.h"
+#include "crc.h"
+#include "bsp_msp_port.h"
+#include "mainHandle.h"
+#include "uartTask.h"
+#include "spiTask.h"
+#include "i2cTask.h"
+#include "timTask.h"
+#include "protocolDeal.h"
+#include "protocolTest.h"
+#include "TECdeal.h"
+//#include "pidDeal.h"
+#include "flash_if.h"
+#include "eepromDeal.h"
+//#include "errcode.h"
+#include  "Version.h"
+
+/*
+*********************************************************************************************************
+*                                               INT DEFINES
+*********************************************************************************************************
+*/
+
+/*
+*********************************************************************************************************
+*                                           FUNCTION PROTOTYPES
+*********************************************************************************************************
+*/
+
+/*
+*********************************************************************************************************
+*                                             MODULE END
+*********************************************************************************************************
+*/
+
+
+#endif /* End */
+
